@@ -97,6 +97,13 @@ export default function Home() {
   const isSpeakingRef = useRef(false)
   const speechTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSpeechActivityRef = useRef<number>(0)
+  
+  // VAD (Voice Activity Detection) refs
+  const vadAudioContextRef = useRef<AudioContext | null>(null)
+  const vadAnalyserRef = useRef<AnalyserNode | null>(null)
+  const vadMicrophoneStreamRef = useRef<MediaStream | null>(null)
+  const audioOutputHistoryRef = useRef<Array<{timestamp: number, duration: number}>>([])
+  const vadIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const apiKey = process.env.NEXT_PUBLIC_ELEVEN_AI_API_KEY || 'sk_a1a42febc7c6cd04b02d24012ffa1bf3e3e9707fe29ab954'
   const agentId = process.env.NEXT_PUBLIC_ELEVEN_AI_AGENT_ID || 'agent_9901k3wpqp85f80rhmz3t3y1tv5p'
@@ -155,6 +162,152 @@ export default function Home() {
     setInputText('')
   }
 
+  // === Voice Activity Detection (VAD) Implementation ===
+  
+  const initializeVAD = async () => {
+    try {
+      // Initialize audio context for VAD
+      if (!vadAudioContextRef.current) {
+        vadAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+      }
+
+      // Get microphone stream
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      })
+      vadMicrophoneStreamRef.current = stream
+
+      // Create analyser node
+      vadAnalyserRef.current = vadAudioContextRef.current.createAnalyser()
+      vadAnalyserRef.current.fftSize = 256
+      vadAnalyserRef.current.smoothingTimeConstant = 0.3
+
+      // Connect microphone to analyser
+      const source = vadAudioContextRef.current.createMediaStreamSource(stream)
+      source.connect(vadAnalyserRef.current)
+
+      console.log('VAD initialized successfully')
+      startVADMonitoring()
+
+    } catch (error) {
+      console.error('Failed to initialize VAD:', error)
+    }
+  }
+
+  const startVADMonitoring = () => {
+    if (!vadAnalyserRef.current || vadIntervalRef.current) return
+
+    vadIntervalRef.current = setInterval(() => {
+      if (vadAnalyserRef.current) {
+        const vadResult = analyzeAudioForVoice(vadAnalyserRef.current)
+        // Store result for interruption detection (we'll use this later)
+        vadResult.timestamp = Date.now()
+      }
+    }, 50) // Check every 50ms for responsive detection
+  }
+
+  const analyzeAudioForVoice = (analyser: AnalyserNode) => {
+    const frequencyData = new Uint8Array(analyser.frequencyBinCount)
+    const timeData = new Uint8Array(analyser.fftSize)
+    
+    analyser.getByteFrequencyData(frequencyData)
+    analyser.getByteTimeDomainData(timeData)
+
+    // Calculate RMS (Root Mean Square) energy
+    let sum = 0
+    for (let i = 0; i < timeData.length; i++) {
+      const sample = (timeData[i] - 128) / 128 // Convert to -1 to 1 range
+      sum += sample * sample
+    }
+    const rms = Math.sqrt(sum / timeData.length)
+
+    // Analyze frequency content for voice characteristics
+    // Voice typically has energy in 85-4000 Hz range
+    const voiceFreqStart = Math.floor(85 * frequencyData.length / (analyser.context.sampleRate / 2))
+    const voiceFreqEnd = Math.floor(4000 * frequencyData.length / (analyser.context.sampleRate / 2))
+    
+    let voiceEnergy = 0
+    for (let i = voiceFreqStart; i < Math.min(voiceFreqEnd, frequencyData.length); i++) {
+      voiceEnergy += frequencyData[i]
+    }
+
+    // Calculate spectral entropy (lower entropy suggests structured sound like voice)
+    let entropy = 0
+    const totalEnergy = frequencyData.reduce((sum, val) => sum + val, 0)
+    if (totalEnergy > 0) {
+      for (let i = 0; i < frequencyData.length; i++) {
+        const p = frequencyData[i] / totalEnergy
+        if (p > 0) {
+          entropy -= p * Math.log2(p)
+        }
+      }
+      entropy /= Math.log2(frequencyData.length) // Normalize
+    }
+
+    // Voice detection logic
+    const energyThreshold = 0.01
+    const voiceEnergyThreshold = 800
+    const entropyThreshold = 0.85
+
+    const hasVoice = rms > energyThreshold && 
+                     voiceEnergy > voiceEnergyThreshold && 
+                     entropy < entropyThreshold
+
+    return {
+      hasVoice,
+      energy: rms,
+      voiceEnergy,
+      entropy,
+      timestamp: 0 // Will be set by caller
+    }
+  }
+
+  const trackAudioOutput = (duration: number) => {
+    const timestamp = Date.now()
+    audioOutputHistoryRef.current.push({ timestamp, duration })
+    
+    // Clean old entries (keep last 5 seconds)
+    const cutoff = timestamp - 5000
+    audioOutputHistoryRef.current = audioOutputHistoryRef.current.filter(
+      entry => entry.timestamp > cutoff
+    )
+  }
+
+  const isEchoLikely = (confidence: number, timestamp: number) => {
+    // Check if we were playing audio recently
+    const recentOutput = audioOutputHistoryRef.current.find(entry => 
+      timestamp - entry.timestamp < 2000 && // Within 2 seconds
+      timestamp > entry.timestamp // After output started
+    )
+    
+    // Low confidence + recent audio output = likely echo
+    return recentOutput && confidence < 0.3
+  }
+
+  const stopVAD = () => {
+    if (vadIntervalRef.current) {
+      clearInterval(vadIntervalRef.current)
+      vadIntervalRef.current = null
+    }
+    
+    if (vadMicrophoneStreamRef.current) {
+      vadMicrophoneStreamRef.current.getTracks().forEach(track => track.stop())
+      vadMicrophoneStreamRef.current = null
+    }
+    
+    if (vadAudioContextRef.current && vadAudioContextRef.current.state !== 'closed') {
+      vadAudioContextRef.current.close()
+      vadAudioContextRef.current = null
+    }
+    
+    vadAnalyserRef.current = null
+    audioOutputHistoryRef.current = []
+  }
+
   const connectToElevenLabs = async () => {
     if (isConnecting || isConnected) return
 
@@ -196,6 +349,9 @@ export default function Home() {
         setIsConnecting(false)
         setError(null)
 
+        // Initialize VAD for enhanced interruption detection
+        initializeVAD()
+        
         // Start voice recognition IMMEDIATELY before any conversation initialization
         // This prevents the first speech from being cut off
         if (realTimeMode && enableVoice) {
@@ -362,6 +518,9 @@ export default function Home() {
         }
         setIsListening(false)
         
+        // Stop VAD
+        stopVAD()
+        
         // Only auto-reconnect for unexpected disconnections, not normal ones
         if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) { 
           console.log('Attempting to reconnect in 3 seconds... (code:', event.code, ')')
@@ -418,6 +577,9 @@ export default function Home() {
       }
     }
     setIsListening(false)
+    
+    // Stop VAD
+    stopVAD()
   }
 
   const sendMessage = () => {
@@ -558,19 +720,67 @@ export default function Home() {
               return
             }
             
-            // Conservative interruption detection: require very high confidence and multiple criteria
-            // Only allow interruption if we're very confident it's actual user speech, not AI feedback
-            const hasVeryHighConfidenceUserSpeech = event.results.length > 0 && 
-                                                   Array.from(event.results).some(result => 
-                                                     Array.from(result).some(alternative => {
-                                                       const transcript = alternative.transcript.trim()
-                                                       const confidence = alternative.confidence
-                                                       
-                                                       // Require moderate confidence (0.60+) and reasonable length (5+ chars)
-                                                       // Allow both final and interim results for faster interruption
-                                                       return confidence >= 0.60 && transcript.length >= 5
-                                                     })
-                                                   )
+            // Enhanced interruption detection: combine speech recognition with VAD
+            const shouldAllowInterruption = () => {
+              if (event.results.length === 0) return false
+              
+              // Get current VAD analysis
+              const vadResult = vadAnalyserRef.current ? analyzeAudioForVoice(vadAnalyserRef.current) : null
+              
+              // Check speech recognition results
+              for (const result of Array.from(event.results)) {
+                for (const alternative of Array.from(result)) {
+                  const transcript = alternative.transcript.trim()
+                  const confidence = alternative.confidence
+                  const wordCount = transcript.split(' ').filter(word => word.length > 0).length
+                  const timestamp = Date.now()
+                  
+                  // Dynamic confidence thresholds based on context
+                  let confidenceThreshold = 0.50 // Base threshold
+                  
+                  // Increase threshold if VAD doesn't detect clear voice
+                  if (!vadResult?.hasVoice) {
+                    confidenceThreshold = 0.70
+                  }
+                  
+                  // Lower threshold if VAD strongly detects voice
+                  if (vadResult?.hasVoice && vadResult.voiceEnergy > 1200) {
+                    confidenceThreshold = 0.40
+                  }
+                  
+                  // Check if speech meets quality criteria
+                  const hasGoodConfidence = confidence >= confidenceThreshold
+                  const hasMinimumLength = wordCount >= 3 // 3+ words instead of just 5+ characters
+                  const notLikelyEcho = !isEchoLikely(confidence, timestamp)
+                  
+                  // Additional checks for natural speech patterns
+                  const hasNaturalLength = transcript.length >= 6 && transcript.length <= 200
+                  const isNotJustFiller = !transcript.match(/^(um|uh|er|ah|hmm)$/i)
+                  
+                  if (hasGoodConfidence && hasMinimumLength && notLikelyEcho && 
+                      hasNaturalLength && isNotJustFiller) {
+                    
+                    // Log detailed decision info
+                    console.log('🎤 Interruption analysis:', {
+                      transcript,
+                      confidence: confidence.toFixed(3),
+                      threshold: confidenceThreshold.toFixed(3),
+                      wordCount,
+                      vadHasVoice: vadResult?.hasVoice,
+                      vadVoiceEnergy: vadResult?.voiceEnergy?.toFixed(0),
+                      notEcho: notLikelyEcho,
+                      decision: 'ALLOW'
+                    })
+                    
+                    return true
+                  }
+                }
+              }
+              
+              return false
+            }
+            
+            const hasVeryHighConfidenceUserSpeech = shouldAllowInterruption()
             
             if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasVeryHighConfidenceUserSpeech) {
               logger.voiceStart('🛑 User interruption detected', {
@@ -852,9 +1062,10 @@ export default function Home() {
       return
     }
 
-    // Check both our state and the actual recognition state
-    if (isListening) {
-      logger.info('Already listening, skipping start')
+    // Enhanced state checking - check both our state and actual recognition state
+    const actualState = recognitionRef.current.readyState || 'inactive'
+    if (isListening || actualState === 'active') {
+      logger.info('Already listening, skipping start', { isListening, actualState })
       return
     }
 
@@ -873,16 +1084,27 @@ export default function Home() {
       setError(null) // Clear any previous errors
       console.log('Starting voice recognition...')
       
-      // Triple-check state before starting and catch any errors
-      if (!isListening && recognitionRef.current) {
-        try {
-          recognitionRef.current.start()
-        } catch (startError) {
-          console.warn('Recognition start error (likely already started):', startError)
-          // If it's already started, just update our state
-          if (startError instanceof Error && startError.name === 'InvalidStateError') {
-            setIsListening(true)
+      // Ensure recognition is in proper state before starting
+      if (recognitionRef.current) {
+        const currentState = recognitionRef.current.readyState || 'inactive'
+        
+        if (currentState === 'inactive') {
+          try {
+            recognitionRef.current.start()
+            console.log('Speech recognition started successfully')
+          } catch (startError) {
+            console.warn('Recognition start error:', startError)
+            if (startError instanceof Error && startError.name === 'InvalidStateError') {
+              // Recognition might already be active, sync our state
+              setIsListening(true)
+              logger.info('Recognition already active, syncing state')
+            } else {
+              throw startError
+            }
           }
+        } else {
+          logger.info('Recognition not in inactive state:', currentState)
+          setIsListening(currentState === 'active')
         }
       }
     } catch (error) {
@@ -1005,6 +1227,9 @@ export default function Home() {
         chunkGainNode.gain.linearRampToValueAtTime(0.7, currentTime + duration) // Slight fade instead of full fade
         
         console.log(`Playing audio chunk: duration=${duration.toFixed(3)}s with fade-in/out`)
+        
+        // Track audio output for echo detection
+        trackAudioOutput(duration * 1000) // Convert to milliseconds
         
         // Handle completion
         source.onended = () => {
