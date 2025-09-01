@@ -248,14 +248,14 @@ export default function Home() {
       entropy /= Math.log2(frequencyData.length) // Normalize
     }
 
-    // Voice detection logic - lowered thresholds for better user voice detection
+    // Voice detection logic - fixed entropy logic and lowered thresholds
     const energyThreshold = 0.005  // Reduced from 0.01
     const voiceEnergyThreshold = 400  // Reduced from 800
-    const entropyThreshold = 0.90   // Slightly increased from 0.85
+    const entropyThreshold = 0.80   // Lower threshold since higher entropy = more voice-like
 
     const hasVoice = rms > energyThreshold && 
                      voiceEnergy > voiceEnergyThreshold && 
-                     entropy < entropyThreshold
+                     entropy > entropyThreshold  // Fixed: higher entropy indicates voice
 
     return {
       hasVoice,
