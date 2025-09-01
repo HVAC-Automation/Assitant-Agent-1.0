@@ -727,6 +727,17 @@ export default function Home() {
               // Get current VAD analysis
               const vadResult = vadAnalyserRef.current ? analyzeAudioForVoice(vadAnalyserRef.current) : null
               
+              // CRITICAL: If VAD is available and doesn't detect voice, completely block interruptions
+              // This prevents AI speech echo from triggering false interruptions
+              if (vadResult && !vadResult.hasVoice) {
+                console.log('🚫 VAD blocked interruption - no voice activity detected:', {
+                  vadEnergy: vadResult.energy.toFixed(3),
+                  vadVoiceEnergy: vadResult.voiceEnergy.toFixed(0),
+                  vadEntropy: vadResult.entropy.toFixed(3)
+                })
+                return false
+              }
+              
               // Check speech recognition results
               for (const result of Array.from(event.results)) {
                 for (const alternative of Array.from(result)) {
@@ -738,12 +749,12 @@ export default function Home() {
                   // Dynamic confidence thresholds based on context
                   let confidenceThreshold = 0.50 // Base threshold
                   
-                  // Increase threshold if VAD doesn't detect clear voice
-                  if (!vadResult?.hasVoice) {
-                    confidenceThreshold = 0.70
+                  // If VAD is not available, be more conservative
+                  if (!vadResult) {
+                    confidenceThreshold = 0.75 // Higher threshold without VAD
                   }
                   
-                  // Lower threshold if VAD strongly detects voice
+                  // Lower threshold only if VAD strongly detects voice
                   if (vadResult?.hasVoice && vadResult.voiceEnergy > 1200) {
                     confidenceThreshold = 0.40
                   }
