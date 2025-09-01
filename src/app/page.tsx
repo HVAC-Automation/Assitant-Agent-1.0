@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { logger } from '@/lib/logger'
 
 interface ChatMessage {
   id: string
@@ -635,8 +636,12 @@ export default function Home() {
           }
 
           recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-            console.error('Speech recognition error:', event.error)
-            console.error('Error details:', event)
+            logger.voiceError('Speech recognition error occurred', {
+              error: event.error,
+              type: event.type,
+              timeStamp: event.timeStamp,
+              isTrusted: event.isTrusted
+            })
             
             // Clear any pending speech timeout
             if (speechTimeoutRef.current) {
@@ -644,29 +649,49 @@ export default function Home() {
               speechTimeoutRef.current = null
             }
             
-            if (event.error === 'network') {
-              setError('Network error - check your internet connection')
-            } else if (event.error === 'not-allowed') {
-              setError('Microphone access denied - please allow microphone permissions')
+            // Handle different error types with better messaging
+            const errorActions = {
+              'network': 'Network error - will retry in 3 seconds',
+              'audio-capture': 'Microphone error - checking permissions',
+              'not-allowed': 'Microphone permission denied - please allow microphone access',
+              'no-speech': 'No speech detected - restarting listener',
+              'aborted': 'Speech recognition aborted - restarting',
+              'language-not-supported': 'Language not supported'
+            }
+            
+            const errorMessage = errorActions[event.error as keyof typeof errorActions] || `Speech error: ${event.error}`
+            
+            if (event.error === 'not-allowed') {
+              setError(errorMessage)
             } else if (event.error === 'no-speech') {
-              console.log('No speech detected, continuing...')
+              logger.info('No speech detected, continuing...')
             } else {
-              setError(`Speech recognition error: ${event.error}`)
+              logger.warn(errorMessage)
             }
             
             setIsListening(false)
             
-            // Auto-restart for real-time mode unless it's a permission error
-            if (realTimeMode && event.error !== 'not-allowed' && event.error !== 'aborted') {
+            // Auto-restart for real-time mode with smarter retry logic
+            const recoverableErrors = ['network', 'audio-capture', 'no-speech', 'aborted']
+            if (realTimeMode && recoverableErrors.includes(event.error)) {
+              const retryDelay = event.error === 'network' ? 3000 : 1500
               setTimeout(() => {
-                console.log('Restarting speech recognition after error')
-                startVoiceRecognition()
-              }, 1000)
+                if (realTimeMode && !isListening) {
+                  logger.voiceStart('Auto-restarting speech recognition', { previousError: event.error })
+                  startVoiceRecognition()
+                }
+              }, retryDelay)
             }
           }
 
           recognition.onend = () => {
-            console.log('Speech recognition ended')
+            logger.voiceEnd('Speech recognition ended', {
+              realTimeMode,
+              enableVoice,
+              isSpeaking,
+              isListening
+            })
+            
             setIsListening(false)
             
             // Clear any pending speech timeout
@@ -675,11 +700,16 @@ export default function Home() {
               speechTimeoutRef.current = null
             }
             
-            // Auto-restart for real-time mode
-            if (realTimeMode) {
+            // Auto-restart for real-time mode with better conditions
+            if (realTimeMode && enableVoice && !isSpeaking) {
               setTimeout(() => {
-                console.log('Restarting speech recognition for continuous listening')
-                startVoiceRecognition()
+                if (realTimeMode && enableVoice && !isListening && !isSpeaking) {
+                  logger.voiceStart('Auto-restarting speech recognition (keepalive)', {
+                    reason: 'onend_keepalive',
+                    delay: 500
+                  })
+                  startVoiceRecognition()
+                }
               }, 500)
             }
           }
@@ -773,18 +803,24 @@ export default function Home() {
   }, [realTimeMode, enableVoice, isConnected, isPlayingAudio, isSpeaking, isListening])
   
   const startVoiceRecognition = async () => {
-    console.log('startVoiceRecognition called, isListening:', isListening)
+    logger.voiceStart('startVoiceRecognition called', {
+      isListening,
+      realTimeMode,
+      enableVoice,
+      isSpeaking,
+      hasRecognition: !!recognitionRef.current
+    })
     
     if (!recognitionRef.current) {
       const errorMsg = 'Voice recognition not supported in this browser'
-      console.error(errorMsg)
+      logger.voiceError(errorMsg)
       setError(errorMsg)
       return
     }
 
     // Check both our state and the actual recognition state
     if (isListening) {
-      console.log('Already listening, skipping start')
+      logger.info('Already listening, skipping start')
       return
     }
 
