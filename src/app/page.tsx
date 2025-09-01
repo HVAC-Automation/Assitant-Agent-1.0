@@ -3,13 +3,34 @@
 import { useState, useRef, useEffect } from 'react'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { Button } from '@/components/ui/button'
-import { Zap } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
+}
+
+interface MessageBubbleProps {
+  message: ChatMessage
+}
+
+function MessageBubble({ message }: MessageBubbleProps) {
+  return (
+    <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+      <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
+        message.role === 'user' 
+          ? 'bg-blue-500 text-white' 
+          : 'bg-gray-200 text-gray-900'
+      }`}>
+        <p className="text-sm">{message.content}</p>
+        <p className="text-xs opacity-70 mt-1">
+          {message.timestamp.toLocaleTimeString()}
+        </p>
+      </div>
+    </div>
+  )
 }
 
 // Helper function to create WAV buffer from PCM data
@@ -49,6 +70,7 @@ function createWavBuffer(pcmData: Uint8Array, sampleRate: number, channels: numb
 export default function Home() {
   const [enableVoice, setEnableVoice] = useState(true)
   const [realTimeMode, setRealTimeMode] = useState(true)
+  const [isClient, setIsClient] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -310,15 +332,17 @@ export default function Home() {
         setIsConnected(false)
         setIsConnecting(false)
         
-        // Auto-reconnect if not a manual disconnect
-        if (event.code !== 1000 && event.code !== 1006) { // Avoid reconnecting on normal closure or abnormal closure
-          console.log('Attempting to reconnect in 3 seconds...')
+        // Only auto-reconnect for unexpected disconnections, not normal ones
+        if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) { 
+          console.log('Attempting to reconnect in 3 seconds... (code:', event.code, ')')
           setTimeout(() => {
-            if (!isConnected && !isConnecting && wsRef.current?.readyState !== WebSocket.CONNECTING) {
+            if (!isConnected && !isConnecting && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
               console.log('Auto-reconnecting...')
               connectToElevenLabs()
             }
           }, 3000)
+        } else {
+          console.log('Normal WebSocket closure, not reconnecting (code:', event.code, ')')
         }
       }
 
@@ -413,8 +437,10 @@ export default function Home() {
     // This will be triggered after the AI responds
   }
 
-  // Initialize speech recognition, synthesis, and Web Audio API
+  // Initialize client-side flag and speech recognition, synthesis, and Web Audio API
   useEffect(() => {
+    setIsClient(true)
+    
     if (typeof window !== 'undefined') {
       // Initialize Web Audio API for smooth audio playback
       initializeAudioContext()
@@ -447,6 +473,49 @@ export default function Home() {
 
           recognitionRef.current.onresult = (event) => {
             console.log('Speech recognition onresult fired, results:', event.results.length)
+            
+            // Enhanced AI voice feedback detection
+            let possibleAIVoice = false
+            let hasLowConfidenceResults = false
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const result = event.results[i]
+              const transcript = result[0].transcript.toLowerCase().trim()
+              const confidence = result[0].confidence
+              
+              // Track if we have consistently low confidence results
+              if (confidence < 0.5) {
+                hasLowConfidenceResults = true
+              }
+              
+              // Enhanced AI voice pattern detection
+              const aiPatterns = [
+                'hey there', 'izzy', 'hello', 'how can i help', 'i can show you',
+                'got it', 'sure', 'before i dive', 'are you looking', 'i can',
+                'would you prefer', 'do you want', 'let me know', 'what fits'
+              ]
+              
+              // Check for AI patterns with low confidence OR during AI speaking time
+              if ((confidence < 0.3 && aiPatterns.some(pattern => transcript.includes(pattern))) ||
+                  (confidence < 0.1) || // Very low confidence is likely AI voice
+                  (isPlayingAudioRef.current && !allowInterruptionRef.current && confidence < 0.7)) { // During non-interruptible AI speech
+                possibleAIVoice = true
+                console.log('🚫 Detected AI voice feedback, ignoring:', transcript, 'confidence:', confidence)
+                break
+              }
+            }
+            
+            // Also ignore if we're getting multiple very short, low-confidence results rapidly
+            if (hasLowConfidenceResults && event.results.length > 1 && 
+                Array.from(event.results).every(r => r[0].transcript.trim().length < 10)) {
+              console.log('🚫 Ignoring rapid low-confidence short results (likely AI voice)')
+              return
+            }
+            
+            // Ignore results that are likely AI voice feedback
+            if (possibleAIVoice) {
+              return
+            }
             
             // DEBUG: Check interruption conditions
             console.log('🔍 Interruption check: isPlayingAudio:', isPlayingAudioRef.current, 'isSpeaking:', isSpeakingRef.current, 'allowInterruption:', allowInterruptionRef.current, 'audioQueue length:', audioQueue.length)
@@ -701,7 +770,7 @@ export default function Home() {
   }, [realTimeMode, enableVoice, isConnected, isPlayingAudio, isSpeaking, isListening])
   
   const startVoiceRecognition = async () => {
-    console.log('startVoiceRecognition called, isListening:', isListening)
+    console.log('startVoiceRecognition called, isListening:', isListening, 'recognition state:', recognitionRef.current?.readyState)
     
     if (!recognitionRef.current) {
       const errorMsg = 'Voice recognition not supported in this browser'
@@ -710,8 +779,10 @@ export default function Home() {
       return
     }
 
-    if (isListening) {
-      console.log('Already listening, skipping start')
+    // Check both our state and the actual recognition state
+    if (isListening || (recognitionRef.current && 
+        (recognitionRef.current.readyState === 'active' || recognitionRef.current.readyState === 'starting'))) {
+      console.log('Already listening or starting, skipping start')
       return
     }
 
@@ -730,9 +801,17 @@ export default function Home() {
       setError(null) // Clear any previous errors
       console.log('Starting voice recognition...')
       
-      // Double-check state before starting
-      if (!isListening && recognitionRef.current) {
-        recognitionRef.current.start()
+      // Triple-check state before starting and catch any errors
+      if (!isListening && recognitionRef.current && recognitionRef.current.readyState !== 'active') {
+        try {
+          recognitionRef.current.start()
+        } catch (startError) {
+          console.warn('Recognition start error (likely already started):', startError)
+          // If it's already started, just update our state
+          if (startError.name === 'InvalidStateError') {
+            setIsListening(true)
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to start voice recognition:', error)
@@ -898,226 +977,333 @@ export default function Home() {
     })
   }
 
-  return (
-    <AppLayout>
-      <div className="flex flex-col items-center justify-center space-y-6">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-2">AI Assistant</h1>
-          <p className="text-lg text-muted-foreground max-w-2xl">
-            Voice and chat interface powered by ElevenLabs Conversational AI
-          </p>
-          
-          {/* Voice & Real-time Toggles */}
-          <div className="flex items-center justify-center mt-4 space-x-4">
-            <Button
-              variant={enableVoice ? "default" : "outline"}
-              size="sm"
-              onClick={() => setEnableVoice(!enableVoice)}
-              className="flex items-center space-x-2"
-            >
-              {enableVoice ? '🔊' : '🔇'}
-              <span>{enableVoice ? 'Voice ON' : 'Voice OFF'}</span>
-            </Button>
-            <Button
-              variant={realTimeMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => setRealTimeMode(!realTimeMode)}
-              className="flex items-center space-x-2"
-            >
-              ⚡
-              <span>{realTimeMode ? 'Real-time' : 'Manual'}</span>
-            </Button>
+  const [showChat, setShowChat] = useState(false)
+
+  // Prevent hydration mismatch by not rendering conditional UI until client-side
+  if (!isClient) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col items-center justify-center min-h-screen p-4">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold mb-4">Eleven</h1>
+            <p className="text-muted-foreground mb-8">How can I help you today?</p>
           </div>
-          
-          {/* Debug buttons */}
-          <div className="flex items-center justify-center mt-2 space-x-2 text-xs">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                console.log('=== MANUAL TEST: Sending test message ===')
-                sendVoiceMessage('This is a test message')
-              }}
-              className="text-xs"
-            >
-              Test Send
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                console.log('=== MANUAL TEST: Playing test audio ===')
-                // Create a simple PCM test audio (1 second of 440Hz tone)
-                const sampleRate = 16000
-                const duration = 1
-                const samples = sampleRate * duration
-                const pcmData = new Uint8Array(samples * 2) // 16-bit samples
-                
-                for (let i = 0; i < samples; i++) {
-                  const sample = Math.sin(2 * Math.PI * 440 * i / sampleRate) * 0.1 * 32767
-                  const offset = i * 2
-                  pcmData[offset] = sample & 0xff
-                  pcmData[offset + 1] = (sample >> 8) & 0xff
-                }
-                
-                const wavBuffer = createWavBuffer(pcmData, sampleRate, 1)
-                const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' })
-                const audioUrl = URL.createObjectURL(audioBlob)
-                const audio = new Audio(audioUrl)
-                audio.play()
-              }}
-              className="text-xs"
-            >
-              Test Audio
-            </Button>
+          <div className="w-80 h-80 rounded-full bg-gradient-to-br from-blue-400 via-purple-400 to-indigo-500 flex items-center justify-center relative overflow-hidden">
+            <div className="absolute inset-0 bg-white/20 backdrop-blur-sm"></div>
+            <div className="relative z-10 bg-black/80 text-white px-6 py-3 rounded-full flex items-center space-x-2">
+              <div className="w-3 h-3 bg-white rounded-full"></div>
+              <span>Loading...</span>
+            </div>
           </div>
         </div>
+      </AppLayout>
+    )
+  }
+
+  return (
+    <AppLayout>
+      <div className="flex flex-col items-center justify-center min-h-screen p-4">
+        {/* Clean Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold mb-4">Eleven</h1>
+          <p className="text-muted-foreground mb-8">How can I help you today?</p>
+        </div>
+
+        {/* Main interface components - Only show after client hydration */}
+        {isClient && (
+          <>
+            {/* Main Call Interface - Only show in voice mode */}
+            {enableVoice && (
+              <div className="relative mb-8">
+                {/* Large circular interface */}
+                <div className="w-80 h-80 rounded-full bg-gradient-to-br from-blue-400 via-purple-400 to-indigo-500 flex items-center justify-center relative overflow-hidden">
+                  {/* Glass effect overlay */}
+                  <div className="absolute inset-0 bg-white/20 backdrop-blur-sm"></div>
+                  
+                  {/* Call button */}
+                  <Button
+                    onClick={isConnected ? disconnectFromElevenLabs : connectToElevenLabs}
+                    disabled={isConnecting}
+                    className="relative z-10 bg-black/80 hover:bg-black/90 text-white px-6 py-3 rounded-full flex items-center space-x-2"
+                  >
+                    <div className="w-4 h-4 flex items-center justify-center">
+                      {isConnecting ? (
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      ) : isConnected ? (
+                        <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                      ) : (
+                        <div className="w-3 h-3 bg-white rounded-full"></div>
+                      )}
+                    </div>
+                    <span>{isConnecting ? 'Connecting...' : isConnected ? 'End call' : 'Start a call'}</span>
+                  </Button>
+                </div>
+
+                {/* Chat toggle button - positioned at bottom right of circle */}
+                <Button
+                  onClick={() => setShowChat(!showChat)}
+                  variant="outline"
+                  size="sm"
+                  className="absolute -bottom-2 -right-2 bg-white shadow-md rounded-full w-12 h-12 p-0 flex items-center justify-center"
+                >
+                  <div className="w-5 h-5 flex flex-col space-y-0.5">
+                    <div className="w-full h-0.5 bg-gray-600 rounded"></div>
+                    <div className="w-3/4 h-0.5 bg-gray-600 rounded"></div>
+                    <div className="w-1/2 h-0.5 bg-gray-600 rounded"></div>
+                  </div>
+                </Button>
+              </div>
+            )}
+
+            {/* Voice/Text Mode Toggle */}
+            <div className="flex items-center space-x-4 mb-6">
+              <Button
+                variant={enableVoice ? "default" : "outline"}
+                onClick={() => {
+                  const wasTextMode = !enableVoice
+                  const wasVoiceMode = enableVoice
+                  setEnableVoice(!enableVoice)
+                  
+                  // If switching FROM voice mode TO text mode, immediately stop all audio
+                  if (wasVoiceMode && isConnected) {
+                    console.log('Switching to text-only mode - stopping all audio immediately')
+                    
+                    // Stop current ElevenLabs audio
+                    if (currentSourceRef.current) {
+                      try {
+                        currentSourceRef.current.stop()
+                        currentSourceRef.current.disconnect()
+                      } catch (e) {
+                        console.log('Audio source already stopped')
+                      }
+                      currentSourceRef.current = null
+                    }
+                    
+                    // Clear audio queue
+                    setAudioQueue([])
+                    setIsPlayingAudio(false)
+                    isPlayingAudioRef.current = false
+                    
+                    // Stop browser TTS if playing
+                    if (synthRef.current) {
+                      synthRef.current.cancel()
+                    }
+                    setIsSpeaking(false)
+                    isSpeakingRef.current = false
+                    
+                    // Stop speech recognition
+                    if (recognitionRef.current && isListening) {
+                      try {
+                        recognitionRef.current.stop()
+                      } catch (e) {
+                        console.log('Speech recognition already stopped')
+                      }
+                    }
+                    setIsListening(false)
+                  }
+                  
+                  // If switching FROM text mode TO voice mode, just enable listening for future inputs
+                  if (wasTextMode && isConnected) {
+                    console.log('Switching to voice mode - enabling microphone for future inputs')
+                    
+                    // Start voice recognition immediately for new inputs (don't read old messages)
+                    setTimeout(() => {
+                      if (!isListening) {
+                        startVoiceRecognition()
+                      }
+                    }, 100)
+                    
+                    // DON'T speak old messages - just be ready for new voice interaction
+                  }
+                }}
+                className="rounded-full"
+              >
+                {enableVoice ? '🎤 Voice' : '💬 Text only'}
+              </Button>
+            </div>
+          </>
+        )}
 
         {/* Error Display */}
         {error && (
-          <div className="w-full max-w-4xl mx-auto mb-4 p-3 bg-red-100 border border-red-300 rounded-md">
-            <p className="text-red-700 text-sm">⚠️ {error}</p>
+          <div className="w-full max-w-md mx-auto mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700 text-sm text-center">⚠️ {error}</p>
           </div>
         )}
-        
-        {/* Status Display */}
-        <div className="w-full max-w-4xl mx-auto mb-4 p-3 bg-muted/20 border rounded-md">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center space-x-4">
-              <span className={`flex items-center space-x-1 ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
-                <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-              </span>
-              <span className={`flex items-center space-x-1 ${isListening ? 'text-blue-600' : 'text-gray-600'}`}>
-                <span className={`w-2 h-2 rounded-full ${isListening ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'}`}></span>
-                <span>{isListening ? 'Listening...' : 'Not listening'}</span>
-              </span>
-              <span className={`flex items-center space-x-1 ${isLoading ? 'text-yellow-600' : 'text-gray-600'}`}>
-                <span className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`}></span>
-                <span>{isLoading ? 'AI thinking...' : 'Ready'}</span>
-              </span>
-              <span className={`flex items-center space-x-1 ${isSpeaking ? 'text-purple-600' : 'text-gray-600'}`}>
-                <span className={`w-2 h-2 rounded-full ${isSpeaking ? 'bg-purple-500 animate-pulse' : 'bg-gray-400'}`}></span>
-                <span>{isSpeaking ? 'AI speaking...' : 'Quiet'}</span>
-              </span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Mode: {realTimeMode ? 'Real-time' : 'Manual'} | Voice: {enableVoice ? 'ON' : 'OFF'}
-            </div>
-          </div>
-        </div>
 
-        {/* ElevenLabs Chat Interface */}
-        <div className="w-full max-w-4xl mx-auto border rounded-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <h3 className="text-lg font-semibold">ElevenLabs AI Agent</h3>
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-              <span className="text-sm text-muted-foreground">
-                {isConnecting ? 'Connecting...' : isConnected ? 'Connected' : 'Disconnected'}
-              </span>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              {enableVoice && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={stopSpeaking}
-                  disabled={!isSpeaking}
-                >
-                  {isSpeaking ? '🔇 Stop' : '🔊'}
-                </Button>
-              )}
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={isConnected ? disconnectFromElevenLabs : connectToElevenLabs}
-                disabled={isConnecting}
-              >
-                {isConnecting ? 'Connecting...' : isConnected ? 'Disconnect' : 'Connect'}
-              </Button>
-            </div>
-          </div>
+        {/* Conditional UI - Only render after client hydration */}
+        {isClient && (
+          <>
+            {/* Text-Only Mode: Full Screen Chat Interface */}
+            {!enableVoice && (
+              <div className="w-full max-w-4xl mx-auto bg-white border rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold">Chat with Eleven</h3>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      onClick={isConnected ? disconnectFromElevenLabs : connectToElevenLabs}
+                      disabled={isConnecting}
+                      variant={isConnected ? "destructive" : "default"}
+                      size="sm"
+                      className="rounded-full"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                          Connecting...
+                        </>
+                      ) : isConnected ? (
+                        <>
+                          <div className="w-2 h-2 bg-white rounded-full mr-2"></div>
+                          Disconnect
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-2 h-2 bg-white rounded-full mr-2"></div>
+                          Connect
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
 
-          <div className="h-96 border rounded-lg p-4 mb-4 bg-muted/20 overflow-y-auto">
-            {messages.length === 0 ? (
-              <div className="text-center text-muted-foreground py-8">
-                <p>Start a conversation with your AI agent!</p>
-                <p className="text-sm mt-2">{isConnected ? 'Type a message below' : 'Click "Connect" to begin'}</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((message) => (
-                  <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                      message.role === 'user' 
-                        ? 'bg-blue-500 text-white' 
-                        : 'bg-gray-200 text-gray-800'
-                    }`}>
-                      <div className="text-sm">{message.content}</div>
-                      <div className="text-xs opacity-70 mt-1">
-                        {message.timestamp.toLocaleTimeString()}
-                      </div>
+                <div className="h-96 border rounded-lg p-4 mb-4 bg-gray-50 overflow-y-auto">
+                  {messages.length === 0 ? (
+                    <div className="text-center text-muted-foreground py-12">
+                      <p className="text-lg">Start a conversation!</p>
+                      {!isConnected && (
+                        <p className="text-sm mt-2">Click "Connect" to begin</p>
+                      )}
                     </div>
-                  </div>
-                ))}
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-gray-200 rounded-lg px-4 py-2">
-                      <div className="text-sm text-gray-600">AI is thinking...</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {messages.map((message) => (
+                        <MessageBubble key={message.id} message={message} />
+                      ))}
+                      {isLoading && (
+                        <div className="flex items-center space-x-2 text-muted-foreground">
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                          <span className="text-sm">AI is thinking...</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                {/* Text input always visible in text-only mode */}
+                <div className="flex space-x-2">
+                  <Input
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        sendMessage()
+                      }
+                    }}
+                    placeholder="Type your message..."
+                    disabled={!isConnected || isLoading}
+                    className="flex-1 rounded-full text-lg py-3"
+                  />
+                  
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!isConnected || !inputText.trim() || isLoading}
+                    className="rounded-full px-6"
+                    size="lg"
+                  >
+                    {isLoading ? (
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      '→'
+                    )}
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
 
-          <div className="flex space-x-2">
-            <Button 
-              variant={isListening ? "destructive" : "outline"} 
-              size="icon"
-              onClick={startVoiceRecognition}
-              disabled={!isConnected || !enableVoice}
-              title={enableVoice ? (isListening ? "Stop listening" : "Start voice input") : "Voice disabled"}
-            >
-              {isListening ? '🎤' : '🎙️'}
-            </Button>
-            <input 
-              type="text" 
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder={isListening ? "Listening..." : "Type your message or click mic..."} 
-              className="flex-1 px-3 py-2 border rounded-md"
-              disabled={!isConnected || isLoading || isListening}
-            />
-            <Button 
-              onClick={sendMessage}
-              disabled={!isConnected || !inputText.trim() || isLoading}
-            >
-              {isLoading ? 'Sending...' : 'Send'}
-            </Button>
-          </div>
+            {/* Voice Mode: Collapsible Chat Interface */}
+            {enableVoice && showChat && (
+              <div className="w-full max-w-2xl mx-auto bg-white border rounded-lg shadow-lg p-6 animate-in slide-in-from-bottom duration-300">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Chat</h3>
+                  <div className="flex items-center space-x-2">
+                    {isSpeaking && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={stopSpeaking}
+                        className="rounded-full"
+                      >
+                        🔇 Stop
+                      </Button>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setShowChat(false)}
+                      className="rounded-full"
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                </div>
 
-          <p className="text-xs text-muted-foreground mt-2">
-            🎤 {enableVoice ? (isListening ? 'Listening...' : realTimeMode ? 'Real-time mode - click mic for continuous chat' : 'Click mic to speak') : 'Voice disabled'} 
-            <br />
-            ⚡ Mode: {realTimeMode ? 'Real-time (auto-send + auto-listen)' : 'Manual (click Send)'} • Agent: {agentId}
-          </p>
-        </div>
+                <div className="h-80 border rounded-lg p-4 mb-4 bg-gray-50 overflow-y-auto">
+                  {messages.length === 0 ? (
+                    <div className="text-center text-muted-foreground py-8">
+                      <p>Start a conversation!</p>
+                      {!isConnected && (
+                        <p className="text-sm mt-2">Click "Start a call" to begin</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {messages.map((message) => (
+                        <MessageBubble key={message.id} message={message} />
+                      ))}
+                      {isLoading && (
+                        <div className="flex items-center space-x-2 text-muted-foreground">
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                          <span className="text-sm">AI is thinking...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
-        <div className="text-center text-sm text-muted-foreground max-w-md space-y-2">
-          <p>
-            ✅ <strong>WebSocket Integration:</strong> Real-time ElevenLabs Conversational AI
-          </p>
-          <p>
-            🎤 <strong>Voice:</strong> {enableVoice ? 'Speech recognition & synthesis enabled' : 'Text-only mode'}
-          </p>
-          <p className="mt-2">
-            🎯 <strong>Features:</strong> Live conversation • Voice input/output • Message history
-          </p>
-        </div>
+                {/* Text input always available in voice mode chat */}
+                <div className="flex space-x-2">
+                  <Input
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        sendMessage()
+                      }
+                    }}
+                    placeholder="Type your message..."
+                    disabled={!isConnected || isLoading}
+                    className="flex-1 rounded-full"
+                  />
+                  
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!isConnected || !inputText.trim() || isLoading}
+                    className="rounded-full"
+                  >
+                    {isLoading ? (
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      '→'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </AppLayout>
   )
