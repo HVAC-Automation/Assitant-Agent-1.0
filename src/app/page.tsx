@@ -334,6 +334,34 @@ export default function Home() {
         setIsConnected(false)
         setIsConnecting(false)
         
+        // Clean up audio and speech recognition on any WebSocket closure
+        if (currentSourceRef.current) {
+          try {
+            currentSourceRef.current.stop()
+            currentSourceRef.current.disconnect()
+          } catch (e) {
+            console.log('Audio source already stopped')
+          }
+          currentSourceRef.current = null
+        }
+        
+        // Clear audio queue
+        setAudioQueue([])
+        setIsPlayingAudio(false)
+        isPlayingAudioRef.current = false
+        setIsSpeaking(false)
+        isSpeakingRef.current = false
+        
+        // Stop speech recognition
+        if (recognitionRef.current && isListening) {
+          try {
+            recognitionRef.current.stop()
+          } catch (e) {
+            console.log('Speech recognition already stopped')
+          }
+        }
+        setIsListening(false)
+        
         // Only auto-reconnect for unexpected disconnections, not normal ones
         if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) { 
           console.log('Attempting to reconnect in 3 seconds... (code:', event.code, ')')
@@ -362,6 +390,34 @@ export default function Home() {
     }
     setIsConnected(false)
     setIsConnecting(false)
+    
+    // Stop all audio and speech recognition when disconnecting
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop()
+        currentSourceRef.current.disconnect()
+      } catch (e) {
+        console.log('Audio source already stopped')
+      }
+      currentSourceRef.current = null
+    }
+    
+    // Clear audio queue
+    setAudioQueue([])
+    setIsPlayingAudio(false)
+    isPlayingAudioRef.current = false
+    setIsSpeaking(false)
+    isSpeakingRef.current = false
+    
+    // Stop speech recognition
+    if (recognitionRef.current && isListening) {
+      try {
+        recognitionRef.current.stop()
+      } catch (e) {
+        console.log('Speech recognition already stopped')
+      }
+    }
+    setIsListening(false)
   }
 
   const sendMessage = () => {
