@@ -124,7 +124,7 @@ export function useConversation(options: UseConversationOptions = {}) {
       }))
       onError?.(errorMessage)
     }
-  }, [deviceId, state.conversationId, state.isLoading, state.isStreaming, enableStreaming, maxMessages, onError, handleRegularResponse, handleStreamingResponse])
+  }, [deviceId, state.conversationId, state.isLoading, state.isStreaming, enableStreaming, maxMessages, onError])
 
   const handleRegularResponse = async (content: string) => {
     const response = await fetch('/api/chat', {

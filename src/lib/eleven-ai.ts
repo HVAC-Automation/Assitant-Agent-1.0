@@ -30,6 +30,13 @@ export interface WebSocketMessage {
   [key: string]: unknown
 }
 
+export interface ElevenAIConversation {
+  id: string
+  messages: ElevenAIMessage[]
+  created_at: string
+  updated_at: string
+}
+
 export class ElevenAIService {
   private apiKey: string
   private agentId: string

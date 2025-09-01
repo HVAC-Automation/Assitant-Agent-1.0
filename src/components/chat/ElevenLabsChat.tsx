@@ -53,8 +53,8 @@ export function ElevenLabsChat({
   const {
     isSpeaking,
     speak,
-    stop: stopSpeaking,
-    supported: ttsSupported
+    cancel: stopSpeaking,
+    isSupported: ttsSupported
   } = useTextToSpeech()
 
   // Auto-scroll to bottom when new messages arrive
@@ -171,7 +171,7 @@ export function ElevenLabsChat({
             <div className="text-center text-muted-foreground py-8">
               <p>Start a conversation with your AI agent!</p>
               {!isConnected && (
-                <p className="text-sm mt-2">Click "Connect" to begin</p>
+                <p className="text-sm mt-2">Click &quot;Connect&quot; to begin</p>
               )}
             </div>
           ) : (

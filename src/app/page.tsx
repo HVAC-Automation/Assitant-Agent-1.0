@@ -108,6 +108,7 @@ export default function Home() {
   const initializeAudioContext = () => {
     if (!audioContextRef.current && typeof window !== 'undefined') {
       try {
+        // @ts-expect-error - webkitAudioContext is a legacy API but still needed for some browsers
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
         gainNodeRef.current = audioContextRef.current.createGain()
         gainNodeRef.current.connect(audioContextRef.current.destination)
@@ -449,18 +450,20 @@ export default function Home() {
       synthRef.current = window.speechSynthesis
 
       // Initialize speech recognition
+      // @ts-expect-error - SpeechRecognition APIs may not be available in all browsers
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       if (SpeechRecognition) {
         try {
-          recognitionRef.current = new SpeechRecognition()
-          recognitionRef.current.continuous = true
-          recognitionRef.current.interimResults = true
-          recognitionRef.current.lang = 'en-US'
-          recognitionRef.current.maxAlternatives = 1
+          const recognition = new SpeechRecognition()
+          recognition.continuous = true
+          recognition.interimResults = true
+          recognition.lang = 'en-US'
+          recognition.maxAlternatives = 1
+          recognitionRef.current = recognition
 
           console.log('Initializing speech recognition with enhanced settings')
 
-          recognitionRef.current.onstart = () => {
+          recognition.onstart = () => {
             console.log('Speech recognition started successfully')
             setIsListening(true)
             setError(null)
@@ -471,7 +474,7 @@ export default function Home() {
             }
           }
 
-          recognitionRef.current.onresult = (event) => {
+          recognition.onresult = (event: SpeechRecognitionEvent) => {
             console.log('Speech recognition onresult fired, results:', event.results.length)
             
             // Enhanced AI voice feedback detection
@@ -631,7 +634,7 @@ export default function Home() {
             }
           }
 
-          recognitionRef.current.onerror = (event) => {
+          recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
             console.error('Speech recognition error:', event.error)
             console.error('Error details:', event)
             
@@ -662,7 +665,7 @@ export default function Home() {
             }
           }
 
-          recognitionRef.current.onend = () => {
+          recognition.onend = () => {
             console.log('Speech recognition ended')
             setIsListening(false)
             
@@ -770,7 +773,7 @@ export default function Home() {
   }, [realTimeMode, enableVoice, isConnected, isPlayingAudio, isSpeaking, isListening])
   
   const startVoiceRecognition = async () => {
-    console.log('startVoiceRecognition called, isListening:', isListening, 'recognition state:', recognitionRef.current?.readyState)
+    console.log('startVoiceRecognition called, isListening:', isListening)
     
     if (!recognitionRef.current) {
       const errorMsg = 'Voice recognition not supported in this browser'
@@ -780,9 +783,8 @@ export default function Home() {
     }
 
     // Check both our state and the actual recognition state
-    if (isListening || (recognitionRef.current && 
-        (recognitionRef.current.readyState === 'active' || recognitionRef.current.readyState === 'starting'))) {
-      console.log('Already listening or starting, skipping start')
+    if (isListening) {
+      console.log('Already listening, skipping start')
       return
     }
 
@@ -802,25 +804,29 @@ export default function Home() {
       console.log('Starting voice recognition...')
       
       // Triple-check state before starting and catch any errors
-      if (!isListening && recognitionRef.current && recognitionRef.current.readyState !== 'active') {
+      if (!isListening && recognitionRef.current) {
         try {
           recognitionRef.current.start()
         } catch (startError) {
           console.warn('Recognition start error (likely already started):', startError)
           // If it's already started, just update our state
-          if (startError.name === 'InvalidStateError') {
+          if (startError instanceof Error && startError.name === 'InvalidStateError') {
             setIsListening(true)
           }
         }
       }
     } catch (error) {
       console.error('Failed to start voice recognition:', error)
-      if (error.name === 'NotAllowedError') {
-        setError('Microphone permission denied. Please allow microphone access.')
-      } else if (error.name === 'NotFoundError') {
-        setError('No microphone found. Please connect a microphone.')
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          setError('Microphone permission denied. Please allow microphone access.')
+        } else if (error.name === 'NotFoundError') {
+          setError('No microphone found. Please connect a microphone.')
+        } else {
+          setError(`Voice recognition failed: ${error.message}`)
+        }
       } else {
-        setError(`Voice recognition failed: ${error.message}`)
+        setError('Voice recognition failed to start. Please check your microphone.')
       }
     }
   }
@@ -1172,7 +1178,7 @@ export default function Home() {
                     <div className="text-center text-muted-foreground py-12">
                       <p className="text-lg">Start a conversation!</p>
                       {!isConnected && (
-                        <p className="text-sm mt-2">Click "Connect" to begin</p>
+                        <p className="text-sm mt-2">Click &quot;Connect&quot; to begin</p>
                       )}
                     </div>
                   ) : (
@@ -1254,7 +1260,7 @@ export default function Home() {
                     <div className="text-center text-muted-foreground py-8">
                       <p>Start a conversation!</p>
                       {!isConnected && (
-                        <p className="text-sm mt-2">Click "Start a call" to begin</p>
+                        <p className="text-sm mt-2">Click &quot;Start a call&quot; to begin</p>
                       )}
                     </div>
                   ) : (
