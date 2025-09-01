@@ -1,4 +1,5 @@
 'use client'
+// Force fresh deployment - updated voice logic
 
 import { useState, useRef, useEffect } from 'react'
 import { AppLayout } from '@/components/layout/AppLayout'
