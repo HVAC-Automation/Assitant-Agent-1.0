@@ -1,4 +1,6 @@
 {
+  "installCommand": "yarn install",
+  "buildCommand": "yarn build",
   "functions": {
     "app/api/**": {
       "maxDuration": 30
