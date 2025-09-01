@@ -509,9 +509,9 @@ export default function Home() {
                                                      const transcript = result[0].transcript.trim()
                                                      const confidence = result[0].confidence
                                                      
-                                                     // Require very high confidence (0.85+) and reasonable length (5+ chars)
-                                                     // This should filter out most AI voice feedback
-                                                     return confidence >= 0.85 && transcript.length >= 5 && result.isFinal
+                                                     // Require high confidence (0.80+) and reasonable length (5+ chars)
+                                                     // Allow both final and interim results for faster interruption
+                                                     return confidence >= 0.80 && transcript.length >= 5
                                                    })
             
             if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasVeryHighConfidenceUserSpeech) {
