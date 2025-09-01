@@ -499,12 +499,21 @@ export default function Home() {
                 'would you prefer', 'do you want', 'let me know', 'what fits'
               ]
               
-              // Check for AI patterns with low confidence OR during AI speaking time
-              if ((confidence < 0.3 && aiPatterns.some(pattern => transcript.includes(pattern))) ||
-                  (confidence < 0.1) || // Very low confidence is likely AI voice
-                  (isPlayingAudioRef.current && !allowInterruptionRef.current && confidence < 0.7)) { // During non-interruptible AI speech
+              // More precise AI voice detection
+              const isLowConfidenceAIPattern = confidence < 0.3 && aiPatterns.some(pattern => transcript.includes(pattern))
+              const isVeryLowConfidence = confidence < 0.05 // Even stricter threshold
+              const isDuringAISpeech = (isPlayingAudioRef.current || isSpeakingRef.current) && confidence < 0.4
+              
+              if (isLowConfidenceAIPattern || isVeryLowConfidence || isDuringAISpeech) {
                 possibleAIVoice = true
-                console.log('🚫 Detected AI voice feedback, ignoring:', transcript, 'confidence:', confidence)
+                logger.voiceError('🚫 Detected AI voice feedback, ignoring', {
+                  transcript,
+                  confidence,
+                  reason: isVeryLowConfidence ? 'very_low_confidence' : 
+                         isLowConfidenceAIPattern ? 'ai_pattern_match' : 'during_ai_speech',
+                  isPlayingAudio: isPlayingAudioRef.current,
+                  isSpeaking: isSpeakingRef.current
+                })
                 break
               }
             }
@@ -524,9 +533,25 @@ export default function Home() {
             // DEBUG: Check interruption conditions
             console.log('🔍 Interruption check: isPlayingAudio:', isPlayingAudioRef.current, 'isSpeaking:', isSpeakingRef.current, 'allowInterruption:', allowInterruptionRef.current, 'audioQueue length:', audioQueue.length)
             
-            // INTERRUPTION DETECTION: If AI is speaking and user starts speaking AND interruptions are allowed
-            if ((isPlayingAudioRef.current || isSpeakingRef.current) && allowInterruptionRef.current) {
-              console.log('🛑 INTERRUPTION DETECTED - User speaking while AI is talking')
+            // INTERRUPTION DETECTION: Only trigger if:
+            // 1. AI is actually speaking/playing
+            // 2. Interruptions are allowed 
+            // 3. User speech has reasonable confidence (not AI feedback)
+            // 4. There's actual final speech content
+            const hasValidUserSpeech = event.results.length > 0 && 
+                                      Array.from(event.results).some(result => 
+                                        result[0].confidence > 0.6 && result[0].transcript.trim().length > 2
+                                      )
+            
+            if ((isPlayingAudioRef.current || isSpeakingRef.current) && 
+                allowInterruptionRef.current && 
+                hasValidUserSpeech) {
+              logger.voiceStart('🛑 VALID INTERRUPTION DETECTED - User speaking while AI is talking', {
+                confidence: event.results[0]?.confidence,
+                transcript: event.results[0]?.transcript,
+                isPlayingAudio: isPlayingAudioRef.current,
+                isSpeaking: isSpeakingRef.current
+              })
               console.log('Stopping AI audio and clearing queue')
               
               // Stop current audio immediately
