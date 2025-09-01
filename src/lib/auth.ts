@@ -7,15 +7,15 @@ import type { Database } from './supabase'
 
 // Create Supabase client for NextAuth (service role for admin operations)
 const supabaseServiceRole = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-role-key'
 )
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.NEXTAUTH_SECRET || 'dev-secret-key',
   adapter: SupabaseAdapter({
-    url: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    secret: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+    secret: process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-role-key',
   }),
   session: {
     strategy: 'jwt',
@@ -39,6 +39,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error('Email and password are required')
+        }
+
+        // Check if environment variables are properly configured
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          console.error('Missing Supabase environment variables')
+          throw new Error('Authentication service is not properly configured')
         }
 
         try {
