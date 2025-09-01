@@ -2,10 +2,13 @@
 // Force fresh deployment - updated voice logic
 
 import { useState, useRef, useEffect } from 'react'
+import { useSession, signOut } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { logger } from '@/lib/logger'
+import { LogOut, User } from 'lucide-react'
 
 interface ChatMessage {
   id: string
@@ -70,6 +73,9 @@ function createWavBuffer(pcmData: Uint8Array, sampleRate: number, channels: numb
 }
 
 export default function Home() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
+  
   const [enableVoice, setEnableVoice] = useState(true)
   const [realTimeMode, setRealTimeMode] = useState(true)
   const [isClient, setIsClient] = useState(false)
@@ -1312,12 +1318,61 @@ export default function Home() {
     )
   }
 
+  // Redirect to sign-in if not authenticated
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+          <p>Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'unauthenticated') {
+    router.push('/auth/signin')
+    return null
+  }
+
+  const handleSignOut = async () => {
+    await signOut({ callbackUrl: '/auth/signin' })
+  }
+
   return (
     <AppLayout>
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
+        {/* User menu in top right */}
+        <div className="fixed top-4 right-4 z-50">
+          <div className="flex items-center space-x-4 bg-white/90 backdrop-blur-sm rounded-lg px-4 py-2 shadow-lg">
+            <div className="flex items-center space-x-2">
+              <User className="h-4 w-4 text-gray-600" />
+              <span className="text-sm text-gray-700">
+                {session?.user?.name || session?.user?.email}
+              </span>
+              {session?.user?.role === 'admin' && (
+                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                  Admin
+                </span>
+              )}
+            </div>
+            <Button
+              onClick={handleSignOut}
+              variant="outline"
+              size="sm"
+              className="flex items-center space-x-1"
+            >
+              <LogOut className="h-3 w-3" />
+              <span>Sign Out</span>
+            </Button>
+          </div>
+        </div>
+
         {/* Clean Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-4">Eleven</h1>
+          <h1 className="text-3xl font-bold mb-4">
+            Welcome, {session?.user?.name?.split(' ')[0] || 'User'}
+          </h1>
           <p className="text-muted-foreground mb-8">How can I help you today?</p>
         </div>
 
