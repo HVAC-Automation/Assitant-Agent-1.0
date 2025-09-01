@@ -509,9 +509,9 @@ export default function Home() {
                                                      const transcript = result[0].transcript.trim()
                                                      const confidence = result[0].confidence
                                                      
-                                                     // Require high confidence (0.80+) and reasonable length (5+ chars)
+                                                     // Require moderate confidence (0.60+) and reasonable length (5+ chars)
                                                      // Allow both final and interim results for faster interruption
-                                                     return confidence >= 0.80 && transcript.length >= 5
+                                                     return confidence >= 0.60 && transcript.length >= 5
                                                    })
             
             if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasVeryHighConfidenceUserSpeech) {
