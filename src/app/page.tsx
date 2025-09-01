@@ -501,13 +501,19 @@ export default function Home() {
               return
             }
             
-            // Simple interruption detection: AI playing + user speech with confidence > 0.6
-            const hasValidUserSpeech = event.results.length > 0 && 
-                                      Array.from(event.results).some(result => 
-                                        result[0].confidence > 0.6 && result[0].transcript.trim().length > 2
-                                      )
+            // Conservative interruption detection: require very high confidence and multiple criteria
+            // Only allow interruption if we're very confident it's actual user speech, not AI feedback
+            const hasVeryHighConfidenceUserSpeech = event.results.length > 0 && 
+                                                   Array.from(event.results).some(result => {
+                                                     const transcript = result[0].transcript.trim()
+                                                     const confidence = result[0].confidence
+                                                     
+                                                     // Require very high confidence (0.85+) and reasonable length (5+ chars)
+                                                     // This should filter out most AI voice feedback
+                                                     return confidence >= 0.85 && transcript.length >= 5 && result.isFinal
+                                                   })
             
-            if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasValidUserSpeech) {
+            if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasVeryHighConfidenceUserSpeech) {
               logger.voiceStart('🛑 User interruption detected', {
                 confidence: event.results[0]?.confidence,
                 transcript: event.results[0]?.transcript
