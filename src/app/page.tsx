@@ -94,7 +94,6 @@ export default function Home() {
   // Refs for interruption detection (to avoid stale closure values)
   const isPlayingAudioRef = useRef(false)
   const isSpeakingRef = useRef(false)
-  const allowInterruptionRef = useRef(false)
   const speechTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSpeechActivityRef = useRef<number>(0)
 
@@ -478,39 +477,19 @@ export default function Home() {
           recognition.onresult = (event: SpeechRecognitionEvent) => {
             console.log('Speech recognition onresult fired, results:', event.results.length)
             
-            // Enhanced AI voice feedback detection
-            let possibleAIVoice = false
-            let hasLowConfidenceResults = false
+            // Simple AI voice filtering - ignore very low confidence during AI speech
+            let shouldIgnore = false
             
             for (let i = event.resultIndex; i < event.results.length; i++) {
               const result = event.results[i]
-              const transcript = result[0].transcript.toLowerCase().trim()
               const confidence = result[0].confidence
               
-              // Track if we have consistently low confidence results
-              if (confidence < 0.5) {
-                hasLowConfidenceResults = true
-              }
-              
-              // Enhanced AI voice pattern detection
-              const aiPatterns = [
-                'hey there', 'izzy', 'hello', 'how can i help', 'i can show you',
-                'got it', 'sure', 'before i dive', 'are you looking', 'i can',
-                'would you prefer', 'do you want', 'let me know', 'what fits'
-              ]
-              
-              // More precise AI voice detection
-              const isLowConfidenceAIPattern = confidence < 0.3 && aiPatterns.some(pattern => transcript.includes(pattern))
-              const isVeryLowConfidence = confidence < 0.05 // Even stricter threshold
-              const isDuringAISpeech = (isPlayingAudioRef.current || isSpeakingRef.current) && confidence < 0.4
-              
-              if (isLowConfidenceAIPattern || isVeryLowConfidence || isDuringAISpeech) {
-                possibleAIVoice = true
-                logger.voiceError('🚫 Detected AI voice feedback, ignoring', {
-                  transcript,
+              // Simple filter: if confidence is very low while AI is speaking, ignore it
+              if ((isPlayingAudioRef.current || isSpeakingRef.current) && confidence < 0.3) {
+                shouldIgnore = true
+                logger.voiceError('🚫 Low confidence during AI speech, ignoring', {
+                  transcript: result[0].transcript,
                   confidence,
-                  reason: isVeryLowConfidence ? 'very_low_confidence' : 
-                         isLowConfidenceAIPattern ? 'ai_pattern_match' : 'during_ai_speech',
                   isPlayingAudio: isPlayingAudioRef.current,
                   isSpeaking: isSpeakingRef.current
                 })
@@ -518,68 +497,46 @@ export default function Home() {
               }
             }
             
-            // Also ignore if we're getting multiple very short, low-confidence results rapidly
-            if (hasLowConfidenceResults && event.results.length > 1 && 
-                Array.from(event.results).every(r => r[0].transcript.trim().length < 10)) {
-              console.log('🚫 Ignoring rapid low-confidence short results (likely AI voice)')
+            if (shouldIgnore) {
               return
             }
             
-            // Ignore results that are likely AI voice feedback
-            if (possibleAIVoice) {
-              return
-            }
-            
-            // DEBUG: Check interruption conditions
-            console.log('🔍 Interruption check: isPlayingAudio:', isPlayingAudioRef.current, 'isSpeaking:', isSpeakingRef.current, 'allowInterruption:', allowInterruptionRef.current, 'audioQueue length:', audioQueue.length)
-            
-            // INTERRUPTION DETECTION: Only trigger if:
-            // 1. AI is actually speaking/playing
-            // 2. Interruptions are allowed 
-            // 3. User speech has reasonable confidence (not AI feedback)
-            // 4. There's actual final speech content
+            // Simple interruption detection: AI playing + user speech with confidence > 0.6
             const hasValidUserSpeech = event.results.length > 0 && 
                                       Array.from(event.results).some(result => 
                                         result[0].confidence > 0.6 && result[0].transcript.trim().length > 2
                                       )
             
-            if ((isPlayingAudioRef.current || isSpeakingRef.current) && 
-                allowInterruptionRef.current && 
-                hasValidUserSpeech) {
-              logger.voiceStart('🛑 VALID INTERRUPTION DETECTED - User speaking while AI is talking', {
+            if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasValidUserSpeech) {
+              logger.voiceStart('🛑 User interruption detected', {
                 confidence: event.results[0]?.confidence,
-                transcript: event.results[0]?.transcript,
-                isPlayingAudio: isPlayingAudioRef.current,
-                isSpeaking: isSpeakingRef.current
+                transcript: event.results[0]?.transcript
               })
-              console.log('Stopping AI audio and clearing queue')
               
-              // Stop current audio immediately
+              // Stop current audio
               if (currentSourceRef.current) {
                 try {
                   currentSourceRef.current.stop()
                   currentSourceRef.current.disconnect()
                 } catch (e) {
-                  console.log('Audio source already stopped or disconnected')
+                  console.log('Audio source already stopped')
                 }
                 currentSourceRef.current = null
               }
               
-              // Clear the audio queue to prevent continued playback
+              // Clear audio queue and reset states
               setAudioQueue([])
               setIsPlayingAudio(false)
               isPlayingAudioRef.current = false
               setIsSpeaking(false)
               isSpeakingRef.current = false
-              allowInterruptionRef.current = false
               
-              // Send interruption signal to WebSocket if available
+              // Send interruption signal
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 try {
                   wsRef.current.send(JSON.stringify({
                     type: 'user_interruption'
                   }))
-                  console.log('Sent interruption signal to ElevenLabs')
                 } catch (e) {
                   console.log('Failed to send interruption signal')
                 }
@@ -629,34 +586,28 @@ export default function Home() {
               clearTimeout(speechTimeoutRef.current)
             }
             
-            // Only start the send timer if we have meaningful content (including interim results)
+            // Start send timer if we have meaningful content
             const currentCompleteTranscript = transcript + finalTranscript + interimTranscript
-            if (currentCompleteTranscript.trim().length >= 3) { // At least 3 characters
-              console.log('Setting speech completion timer (1.5s) for:', currentCompleteTranscript)
+            if (currentCompleteTranscript.trim().length >= 3) {
+              console.log('Setting speech completion timer (1s) for:', currentCompleteTranscript)
               
-              // Capture the current transcript to use when timeout fires
               const capturedTranscript = currentCompleteTranscript
               
               speechTimeoutRef.current = setTimeout(() => {
-                // Double-check that speech hasn't continued
                 const timeSinceLastActivity = Date.now() - lastSpeechActivityRef.current
                 
                 console.log('Speech timeout fired - time since last activity:', timeSinceLastActivity + 'ms')
                 
-                if (timeSinceLastActivity >= 1400) { // Allow small margin for timing (1.4s for 1.5s timeout)
-                  const finalTextToSend = capturedTranscript.trim() // Use the captured transcript
+                if (timeSinceLastActivity >= 900) { // 0.9s margin for 1s timeout
+                  const finalTextToSend = capturedTranscript.trim()
                   if (finalTextToSend && finalTextToSend.length >= 3) {
-                    console.log('Speech appears complete, sending message:', finalTextToSend)
+                    console.log('Speech complete, sending:', finalTextToSend)
                     handleSpeechComplete(finalTextToSend)
-                  } else {
-                    console.log('Speech too short, not sending:', finalTextToSend)
                   }
                 } else {
-                  console.log('Recent speech activity detected, not sending yet')
+                  console.log('Recent speech activity, not sending yet')
                 }
-              }, 1500) // Wait 1.5 seconds after last speech activity
-            } else {
-              console.log('Transcript too short, not setting timer')
+              }, 1000) // 1 second pause
             }
           }
 
@@ -758,14 +709,7 @@ export default function Home() {
         setIsPlayingAudio(true)
         isPlayingAudioRef.current = true
         
-        // Disable interruptions for first chunk to prevent hearing AI's initial response
-        if (audioQueue.length > 1) {
-          console.log('🎤 Enabling interruption detection (not first chunk)')
-          allowInterruptionRef.current = true
-        } else {
-          console.log('🔇 Disabling interruption detection (first chunk)')
-          allowInterruptionRef.current = false
-        }
+        console.log('🎤 Starting audio playback')
         
         try {
           // Wait for the current audio to fully complete before continuing
@@ -1007,7 +951,7 @@ export default function Home() {
           // Restart speech recognition after AI finishes speaking
           if (realTimeMode && enableVoice && !isListening) {
             console.log('🎤 Restarting speech recognition after AI speech ends')
-            allowInterruptionRef.current = false // Disable interruption for next conversation
+            // Audio playback complete
             setTimeout(() => {
               if (!isListening && realTimeMode && enableVoice) {
                 startVoiceRecognition()
