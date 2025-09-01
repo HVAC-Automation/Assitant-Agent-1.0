@@ -11,7 +11,7 @@ const supabaseServiceRole = createClient<Database>(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-role-key'
 )
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const authConfig = NextAuth({
   secret: process.env.NEXTAUTH_SECRET || 'dev-secret-key',
   adapter: SupabaseAdapter({
     url: process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -132,3 +132,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 })
+
+export const { handlers, auth, signIn, signOut } = authConfig
