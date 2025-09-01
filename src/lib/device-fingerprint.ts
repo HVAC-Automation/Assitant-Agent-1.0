@@ -1,5 +1,3 @@
-import crypto from 'crypto'
-
 export class DeviceFingerprint {
   /**
    * Generate a device fingerprint from browser characteristics
@@ -57,7 +55,14 @@ export class DeviceFingerprint {
   }
 
   private static hashString(input: string): string {
-    return crypto.createHash('sha256').update(input).digest('hex').substring(0, 16)
+    // Simple hash function that works in both browser and Node.js
+    let hash = 0
+    for (let i = 0; i < input.length; i++) {
+      const char = input.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(16).padStart(16, '0').substring(0, 16)
   }
 
   /**

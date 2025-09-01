@@ -8,28 +8,42 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Send, Mic, MicOff, Volume2, VolumeX, AlertCircle } from 'lucide-react'
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition'
 import { useTextToSpeech } from '@/hooks/useTextToSpeech'
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: Date
-}
+import { useConversation, type Message } from '@/hooks/useConversation'
 
 interface ChatInterfaceProps {
-  onSendMessage?: (message: string) => void
-  messages?: Message[]
-  isLoading?: boolean
+  enableStreaming?: boolean
+  maxMessages?: number
+  onError?: (error: string) => void
+  onResponse?: (message: Message) => void
 }
 
 export function ChatInterface({ 
-  onSendMessage, 
-  messages = [], 
-  isLoading = false 
+  enableStreaming = false,
+  maxMessages = 100,
+  onError,
+  onResponse
 }: ChatInterfaceProps) {
   const [inputValue, setInputValue] = useState('')
   const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+
+  // Use conversation hook for 11.ai integration
+  const {
+    messages,
+    conversationId,
+    isLoading,
+    isStreaming,
+    error,
+    sendMessage,
+    clearConversation,
+    retryLastMessage,
+    canSend
+  } = useConversation({
+    enableStreaming,
+    maxMessages,
+    onError,
+    onResponse
+  })
 
   // Speech Recognition Hook
   const {
@@ -86,15 +100,15 @@ export function ChatInterface({
   useEffect(() => {
     if (autoSpeakEnabled && messages.length > 0) {
       const lastMessage = messages[messages.length - 1]
-      if (lastMessage.role === 'assistant' && !isLoading) {
+      if (lastMessage.role === 'assistant' && !isLoading && !isStreaming && !lastMessage.isStreaming) {
         speak(lastMessage.content)
       }
     }
-  }, [messages, autoSpeakEnabled, isLoading, speak])
+  }, [messages, autoSpeakEnabled, isLoading, isStreaming, speak])
 
   const handleSendMessage = () => {
-    if (inputValue.trim() && onSendMessage) {
-      onSendMessage(inputValue.trim())
+    if (inputValue.trim() && canSend) {
+      sendMessage(inputValue.trim())
       setInputValue('')
       resetTranscript()
     }
@@ -127,8 +141,15 @@ export function ChatInterface({
       {/* Chat Header */}
       <div className="flex items-center justify-between p-4 border-b">
         <div className="flex items-center space-x-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <div className={`w-2 h-2 rounded-full ${
+            isLoading || isStreaming ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
+          }`}></div>
           <h2 className="text-lg font-semibold">AI Assistant</h2>
+          {conversationId && (
+            <span className="text-xs text-muted-foreground">
+              ({conversationId.substring(0, 8)}...)
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           {!textToSpeechSupported && (
@@ -182,16 +203,24 @@ export function ChatInterface({
                   }`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  <p className="text-xs mt-1 opacity-70">
-                    {message.timestamp.toLocaleTimeString()}
-                  </p>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-xs opacity-70">
+                      {message.timestamp.toLocaleTimeString()}
+                    </p>
+                    {message.isStreaming && (
+                      <div className="flex items-center space-x-1 text-xs opacity-70">
+                        <div className="w-1 h-1 bg-current rounded-full animate-pulse"></div>
+                        <span>streaming...</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))
           )}
           
           {/* Loading indicator */}
-          {isLoading && (
+          {(isLoading || isStreaming) && (
             <div className="flex justify-start mb-4">
               <div className="bg-muted text-muted-foreground rounded-lg px-4 py-2 mr-4">
                 <div className="flex items-center space-x-2">
@@ -200,8 +229,28 @@ export function ChatInterface({
                     <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
                     <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
                   </div>
-                  <span className="text-sm">Thinking...</span>
+                  <span className="text-sm">
+                    {isStreaming ? 'Streaming response...' : 'Thinking...'}
+                  </span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Error display */}
+          {error && (
+            <div className="flex justify-center mb-4">
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2 max-w-md">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="text-sm">{error}</span>
+                </div>
+                <button
+                  onClick={retryLastMessage}
+                  className="text-xs underline mt-1 hover:text-red-800"
+                >
+                  Retry
+                </button>
               </div>
             </div>
           )}
@@ -217,7 +266,7 @@ export function ChatInterface({
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Type your message or use voice input..."
-              disabled={isLoading}
+              disabled={!canSend}
               className="pr-12"
             />
             {speechRecognitionSupported ? (
@@ -226,7 +275,7 @@ export function ChatInterface({
                 size="sm"
                 onClick={toggleVoiceInput}
                 className="absolute right-1 top-1/2 transform -translate-y-1/2 h-8 w-8 p-0"
-                disabled={isLoading}
+                disabled={!canSend}
                 title={isListening ? "Stop listening" : "Start voice input"}
               >
                 {isListening ? (
@@ -246,7 +295,7 @@ export function ChatInterface({
           </div>
           <Button 
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading}
+            disabled={!inputValue.trim() || !canSend}
             size="sm"
           >
             <Send className="h-4 w-4" />

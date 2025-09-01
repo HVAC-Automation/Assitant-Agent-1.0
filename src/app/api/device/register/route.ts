@@ -1,6 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { DeviceFingerprint } from '@/lib/device-fingerprint'
-import { SessionManager, type DeviceSession } from '@/lib/redis'
+import crypto from 'crypto'
+
+// Server-side device fingerprinting utilities
+class ServerDeviceFingerprint {
+  static generateServerFingerprint(headers: Headers): string {
+    const components = [
+      headers.get('user-agent') || '',
+      headers.get('accept-language') || '',
+      headers.get('accept-encoding') || '',
+      headers.get('accept') || '',
+      headers.get('sec-ch-ua') || '',
+      headers.get('sec-ch-ua-platform') || '',
+    ].filter(Boolean)
+
+    const fingerprint = components.join('|')
+    return this.hashString(fingerprint)
+  }
+
+  static createDeviceId(clientFingerprint: string, serverFingerprint: string): string {
+    const components = [
+      clientFingerprint || '',
+      serverFingerprint || '',
+      Date.now().toString(),
+    ].filter(Boolean)
+
+    return this.hashString(components.join('|'))
+  }
+
+  private static hashString(input: string): string {
+    return crypto.createHash('sha256').update(input).digest('hex').substring(0, 16)
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,22 +44,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate server fingerprint from headers
-    const serverFingerprint = DeviceFingerprint.generateServerFingerprint(request.headers)
+    const serverFingerprint = ServerDeviceFingerprint.generateServerFingerprint(request.headers)
     
     // Create unique device ID
-    const deviceId = DeviceFingerprint.createDeviceId(clientFingerprint, serverFingerprint)
+    const deviceId = ServerDeviceFingerprint.createDeviceId(clientFingerprint, serverFingerprint)
 
-    // Store initial session data
-    const sessionData: DeviceSession = {
-      deviceId,
-      userAgent: request.headers.get('user-agent') || '',
-      createdAt: new Date().toISOString(),
-      lastActive: new Date().toISOString(),
-      clientFingerprint,
-      serverFingerprint,
-    }
-
-    await SessionManager.createDeviceSession(deviceId, sessionData)
+    // For now, return deviceId without Redis storage
+    // Session will be managed client-side via localStorage
+    console.log('Device registered:', deviceId)
 
     return NextResponse.json({ deviceId })
   } catch (error) {
