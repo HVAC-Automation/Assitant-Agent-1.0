@@ -505,14 +505,16 @@ export default function Home() {
             // Conservative interruption detection: require very high confidence and multiple criteria
             // Only allow interruption if we're very confident it's actual user speech, not AI feedback
             const hasVeryHighConfidenceUserSpeech = event.results.length > 0 && 
-                                                   Array.from(event.results).some(result => {
-                                                     const transcript = result[0].transcript.trim()
-                                                     const confidence = result[0].confidence
-                                                     
-                                                     // Require moderate confidence (0.60+) and reasonable length (5+ chars)
-                                                     // Allow both final and interim results for faster interruption
-                                                     return confidence >= 0.60 && transcript.length >= 5
-                                                   })
+                                                   Array.from(event.results).some(result => 
+                                                     Array.from(result).some(alternative => {
+                                                       const transcript = alternative.transcript.trim()
+                                                       const confidence = alternative.confidence
+                                                       
+                                                       // Require moderate confidence (0.60+) and reasonable length (5+ chars)
+                                                       // Allow both final and interim results for faster interruption
+                                                       return confidence >= 0.60 && transcript.length >= 5
+                                                     })
+                                                   )
             
             if ((isPlayingAudioRef.current || isSpeakingRef.current) && hasVeryHighConfidenceUserSpeech) {
               logger.voiceStart('🛑 User interruption detected', {
