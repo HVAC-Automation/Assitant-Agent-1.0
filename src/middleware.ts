@@ -44,6 +44,7 @@ export default withAuth(
         if (
           pathname.startsWith('/auth/') ||
           pathname.startsWith('/api/auth/') ||
+          pathname.startsWith('/api/debug') ||
           pathname.startsWith('/public') ||
           pathname.startsWith('/_next/') ||
           pathname.startsWith('/favicon')
