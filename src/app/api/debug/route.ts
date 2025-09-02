@@ -51,6 +51,12 @@ export async function GET() {
     const testPassword = 'admin123'
     const isValidPassword = await bcrypt.compare(testPassword, user.password_hash)
     
+    // Generate a fresh hash for admin123 using our bcrypt
+    const freshHash = await bcrypt.hash('admin123', 12)
+    
+    // Test the fresh hash
+    const freshHashWorks = await bcrypt.compare('admin123', freshHash)
+    
     return NextResponse.json({
       success: true,
       user: {
@@ -59,7 +65,10 @@ export async function GET() {
         is_active: user.is_active,
         hasPasswordHash: !!user.password_hash,
         passwordHashLength: user.password_hash?.length,
-        passwordVerification: isValidPassword
+        passwordVerification: isValidPassword,
+        currentHash: user.password_hash,
+        freshHash: freshHash,
+        freshHashWorks: freshHashWorks
       }
     })
 
