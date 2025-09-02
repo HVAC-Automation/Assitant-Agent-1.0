@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { UserProfile } from '@/lib/user-management'
 import {
   Table,
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { 
   MoreHorizontal, 
   Edit, 
@@ -20,7 +21,9 @@ import {
   UserX,
   Mail,
   Shield,
-  Plus
+  Plus,
+  Users,
+  AlertTriangle
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -37,6 +40,34 @@ interface UserTableProps {
 
 export function UserTable({ users }: UserTableProps) {
   const [loading, setLoading] = useState<string | null>(null)
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
+  const [bulkActionLoading, setBulkActionLoading] = useState(false)
+
+  // Clear selections when users prop changes (e.g., after filtering)
+  useEffect(() => {
+    setSelectedUsers(new Set())
+  }, [users])
+
+  const isAllSelected = users.length > 0 && selectedUsers.size === users.length
+  const isIndeterminate = selectedUsers.size > 0 && selectedUsers.size < users.length
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedUsers(new Set(users.map(u => u.id)))
+    } else {
+      setSelectedUsers(new Set())
+    }
+  }
+
+  const handleSelectUser = (userId: string, checked: boolean) => {
+    const newSelection = new Set(selectedUsers)
+    if (checked) {
+      newSelection.add(userId)
+    } else {
+      newSelection.delete(userId)
+    }
+    setSelectedUsers(newSelection)
+  }
 
   const handleToggleStatus = async (userId: string, currentStatus: boolean) => {
     setLoading(userId)
@@ -86,11 +117,96 @@ export function UserTable({ users }: UserTableProps) {
     }
   }
 
+  const handleBulkAction = async (action: 'activate' | 'deactivate' | 'delete') => {
+    if (selectedUsers.size === 0) return
+
+    const userCount = selectedUsers.size
+    const actionText = action === 'activate' ? 'activate' : action === 'deactivate' ? 'deactivate' : 'delete'
+    
+    if (!confirm(`Are you sure you want to ${actionText} ${userCount} selected user(s)? ${action === 'delete' ? 'This action cannot be undone.' : ''}`)) {
+      return
+    }
+
+    setBulkActionLoading(true)
+    try {
+      const response = await fetch('/api/admin/users/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action,
+          userIds: Array.from(selectedUsers)
+        }),
+      })
+
+      if (response.ok) {
+        window.location.reload()
+      } else {
+        const error = await response.json()
+        alert(`Failed to ${actionText} users: ${error.message || 'Unknown error'}`)
+      }
+    } catch (error) {
+      alert(`Failed to ${actionText} users`)
+    } finally {
+      setBulkActionLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {/* Bulk Actions Toolbar */}
+      {selectedUsers.size > 0 && (
+        <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <div className="flex items-center space-x-2">
+            <Users className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-900">
+              {selectedUsers.size} user{selectedUsers.size === 1 ? '' : 's'} selected
+            </span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkAction('activate')}
+              disabled={bulkActionLoading}
+            >
+              <UserCheck className="mr-1 h-4 w-4" />
+              Activate
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkAction('deactivate')}
+              disabled={bulkActionLoading}
+            >
+              <UserX className="mr-1 h-4 w-4" />
+              Deactivate
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => handleBulkAction('delete')}
+              disabled={bulkActionLoading}
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-[50px]">
+              <Checkbox
+                checked={isAllSelected}
+                onCheckedChange={handleSelectAll}
+                aria-label="Select all users"
+                className={isIndeterminate ? "data-[state=checked]:bg-blue-600" : ""}
+              />
+            </TableHead>
             <TableHead>User</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Status</TableHead>
@@ -102,6 +218,13 @@ export function UserTable({ users }: UserTableProps) {
         <TableBody>
           {users.map((user) => (
             <TableRow key={user.id}>
+              <TableCell>
+                <Checkbox
+                  checked={selectedUsers.has(user.id)}
+                  onCheckedChange={(checked) => handleSelectUser(user.id, !!checked)}
+                  aria-label={`Select ${user.email}`}
+                />
+              </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-3">
                   <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
