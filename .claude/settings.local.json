@@ -8,7 +8,8 @@
       "Bash(yarn build)",
       "Bash(yarn install)",
       "Bash(yarn add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []
