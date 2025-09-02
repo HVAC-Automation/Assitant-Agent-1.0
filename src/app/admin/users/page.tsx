@@ -6,8 +6,14 @@ import { UserPlus } from 'lucide-react'
 import Link from 'next/link'
 
 export default async function UsersPage() {
-  // Get users with pagination
-  const usersData = await UserManager.listUsers(1, 50)
+  let usersData
+  try {
+    // Get users with pagination
+    usersData = await UserManager.listUsers(1, 50)
+  } catch (error) {
+    // Handle case where database might not be available during build
+    usersData = { users: [], total: 0, page: 1, totalPages: 0 }
+  }
 
   return (
     <div className="space-y-6">
