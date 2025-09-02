@@ -23,7 +23,11 @@ import {
   Shield,
   Plus,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  Key,
+  Copy,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -42,6 +46,8 @@ export function UserTable({ users }: UserTableProps) {
   const [loading, setLoading] = useState<string | null>(null)
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
   const [bulkActionLoading, setBulkActionLoading] = useState(false)
+  const [resetPasswordResult, setResetPasswordResult] = useState<{userId: string, password: string} | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
 
   // Clear selections when users prop changes (e.g., after filtering)
   useEffect(() => {
@@ -151,6 +157,47 @@ export function UserTable({ users }: UserTableProps) {
     } finally {
       setBulkActionLoading(false)
     }
+  }
+
+  const handleResetPassword = async (userId: string, userEmail: string) => {
+    if (!confirm(`Are you sure you want to reset the password for ${userEmail}? The user will receive a new temporary password.`)) {
+      return
+    }
+
+    setLoading(userId)
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setResetPasswordResult({ userId, password: result.temporaryPassword })
+        setShowPassword(false)
+      } else {
+        const error = await response.json()
+        alert(`Failed to reset password: ${error.message || 'Unknown error'}`)
+      }
+    } catch (error) {
+      alert('Failed to reset password')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const copyPasswordToClipboard = () => {
+    if (resetPasswordResult?.password) {
+      navigator.clipboard.writeText(resetPasswordResult.password)
+      alert('Password copied to clipboard!')
+    }
+  }
+
+  const closePasswordDialog = () => {
+    setResetPasswordResult(null)
+    setShowPassword(false)
   }
 
   return (
@@ -309,6 +356,15 @@ export function UserTable({ users }: UserTableProps) {
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
+                      onClick={() => handleResetPassword(user.id, user.email)}
+                      disabled={loading === user.id}
+                      className="text-orange-600 hover:text-orange-900"
+                    >
+                      <Key className="mr-2 h-4 w-4" />
+                      Reset Password
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
                       onClick={() => handleDeleteUser(user.id, user.email)}
                       disabled={loading === user.id}
                       className="text-red-600 hover:text-red-900"
@@ -338,6 +394,81 @@ export function UserTable({ users }: UserTableProps) {
                 Add User
               </Link>
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Result Dialog */}
+      {resetPasswordResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Password Reset Successful</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={closePasswordDialog}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </Button>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                A new temporary password has been generated for this user. Please share this password securely with the user.
+              </p>
+              
+              <div className="bg-gray-50 border rounded-md p-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Temporary Password:
+                </label>
+                <div className="flex items-center space-x-2">
+                  <div className="flex-1 font-mono text-sm bg-white border rounded px-3 py-2">
+                    {showPassword ? resetPasswordResult.password : '••••••••••••'}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="px-2"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyPasswordToClipboard}
+                    className="px-2"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                <div className="flex">
+                  <AlertTriangle className="h-5 w-5 text-yellow-400 mr-2 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-medium">Important:</p>
+                    <p>The user should change this password immediately after logging in. This password will work for their next login attempt.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end space-x-2 mt-6">
+              <Button
+                variant="outline"
+                onClick={copyPasswordToClipboard}
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                Copy Password
+              </Button>
+              <Button onClick={closePasswordDialog}>
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}

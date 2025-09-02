@@ -229,6 +229,150 @@ export class UserManager {
   }
 
   /**
+   * Generate a temporary password for admin password reset
+   */
+  static generateTemporaryPassword(): string {
+    const charset = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    const specialChars = '!@#$%^&*'
+    let password = ''
+    
+    // Ensure at least one uppercase, one lowercase, one number, one special char
+    password += charset[Math.floor(Math.random() * 26)] // uppercase
+    password += charset[Math.floor(Math.random() * 26) + 26] // lowercase  
+    password += charset[Math.floor(Math.random() * 10) + 52] // number
+    password += specialChars[Math.floor(Math.random() * specialChars.length)] // special
+    
+    // Fill remaining length with random characters
+    for (let i = 4; i < 12; i++) {
+      const allChars = charset + specialChars
+      password += allChars[Math.floor(Math.random() * allChars.length)]
+    }
+    
+    // Shuffle the password
+    return password.split('').sort(() => Math.random() - 0.5).join('')
+  }
+
+  /**
+   * Admin password reset - generates new temporary password
+   */
+  static async adminResetPassword(userId: string): Promise<string> {
+    const user = await this.getUserById(userId)
+    if (!user) {
+      throw new Error('User not found')
+    }
+
+    const temporaryPassword = this.generateTemporaryPassword()
+    await this.changePassword(userId, temporaryPassword)
+
+    // Log the password reset action
+    console.log(`Admin password reset for user ${user.email} (ID: ${userId})`)
+
+    return temporaryPassword
+  }
+
+  /**
+   * Create password reset token (for user self-service)
+   */
+  static async createPasswordResetToken(email: string): Promise<string> {
+    const user = await this.getUserByEmail(email)
+    if (!user) {
+      throw new Error('User not found')
+    }
+
+    // Generate a secure random token
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+
+    const expiresAt = new Date()
+    expiresAt.setHours(expiresAt.getHours() + 24) // 24 hour expiration
+
+    const { error } = await supabaseAdmin
+      .from('password_reset_tokens')
+      .insert({
+        user_id: user.id,
+        token,
+        expires_at: expiresAt.toISOString(),
+      })
+
+    if (error) {
+      console.error('Error creating password reset token:', error)
+      throw new Error('Failed to create password reset token')
+    }
+
+    return token
+  }
+
+  /**
+   * Verify and use password reset token
+   */
+  static async resetPasswordWithToken(token: string, newPassword: string): Promise<void> {
+    if (newPassword.length < 8) {
+      throw new Error('Password must be at least 8 characters long')
+    }
+
+    // Find valid token
+    const { data: resetToken, error: tokenError } = await supabaseAdmin
+      .from('password_reset_tokens')
+      .select('user_id, expires_at, used')
+      .eq('token', token)
+      .eq('used', false)
+      .single()
+
+    if (tokenError || !resetToken) {
+      throw new Error('Invalid or expired reset token')
+    }
+
+    // Check if token is expired
+    if (new Date() > new Date(resetToken.expires_at)) {
+      throw new Error('Reset token has expired')
+    }
+
+    // Update password
+    await this.changePassword(resetToken.user_id, newPassword)
+
+    // Mark token as used
+    const { error: updateError } = await supabaseAdmin
+      .from('password_reset_tokens')
+      .update({ used: true })
+      .eq('token', token)
+
+    if (updateError) {
+      console.error('Error marking reset token as used:', updateError)
+    }
+  }
+
+  /**
+   * Get password reset tokens for a user (admin only)
+   */
+  static async getPasswordResetTokens(userId: string): Promise<Array<{
+    id: string
+    token: string
+    expiresAt: string
+    used: boolean
+    createdAt: string
+  }>> {
+    const { data: tokens, error } = await supabaseAdmin
+      .from('password_reset_tokens')
+      .select('id, token, expires_at, used, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error getting password reset tokens:', error)
+      throw new Error('Failed to retrieve password reset tokens')
+    }
+
+    return tokens.map(token => ({
+      id: token.id,
+      token: token.token,
+      expiresAt: token.expires_at,
+      used: token.used,
+      createdAt: token.created_at,
+    }))
+  }
+
+  /**
    * Deactivate user account
    */
   static async deactivateUser(userId: string): Promise<void> {
