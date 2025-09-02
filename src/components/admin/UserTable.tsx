@@ -19,7 +19,8 @@ import {
   UserCheck, 
   UserX,
   Mail,
-  Shield
+  Shield,
+  Plus
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -210,7 +211,7 @@ export function UserTable({ users }: UserTableProps) {
           <div className="mt-6">
             <Button asChild>
               <Link href="/admin/users/new">
-                <UserPlus className="mr-2 h-4 w-4" />
+                <Plus className="mr-2 h-4 w-4" />
                 Add User
               </Link>
             </Button>

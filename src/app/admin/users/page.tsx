@@ -1,15 +1,33 @@
 import { UserManager } from '@/lib/user-management'
 import { UserTable } from '@/components/admin/UserTable'
+import { UserSearch } from '@/components/admin/UserSearch'
+import { Pagination } from '@/components/admin/Pagination'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { UserPlus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import Link from 'next/link'
 
-export default async function UsersPage() {
+interface SearchParams {
+  search?: string
+  role?: string
+  status?: string
+  page?: string
+}
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: SearchParams
+}) {
   let usersData
   try {
-    // Get users with pagination
-    usersData = await UserManager.listUsers(1, 50)
+    const page = parseInt(searchParams.page || '1')
+    const search = searchParams.search || ''
+    const role = searchParams.role === 'all' ? '' : (searchParams.role || '')
+    const status = searchParams.status === 'all' ? '' : (searchParams.status || '')
+    
+    // Get users with pagination and filters
+    usersData = await UserManager.listUsers(page, 50, { search, role, status })
   } catch (error) {
     // Handle case where database might not be available during build
     usersData = { users: [], total: 0, page: 1, totalPages: 0 }
@@ -26,7 +44,7 @@ export default async function UsersPage() {
         </div>
         <Button asChild>
           <Link href="/admin/users/new">
-            <UserPlus className="mr-2 h-4 w-4" />
+            <Plus className="mr-2 h-4 w-4" />
             Add User
           </Link>
         </Button>
@@ -39,8 +57,14 @@ export default async function UsersPage() {
             View and manage all registered users in the system
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          <UserSearch />
           <UserTable users={usersData.users} />
+          <Pagination 
+            currentPage={usersData.page} 
+            totalPages={usersData.totalPages} 
+            totalItems={usersData.total} 
+          />
         </CardContent>
       </Card>
     </div>

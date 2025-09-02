@@ -274,9 +274,17 @@ export class UserManager {
   }
 
   /**
-   * List all users with pagination (admin only)
+   * List all users with pagination and filtering (admin only)
    */
-  static async listUsers(page: number = 1, limit: number = 50): Promise<{
+  static async listUsers(
+    page: number = 1, 
+    limit: number = 50,
+    filters?: {
+      search?: string
+      role?: string
+      status?: string
+    }
+  ): Promise<{
     users: UserProfile[]
     total: number
     page: number
@@ -284,17 +292,42 @@ export class UserManager {
   }> {
     const offset = (page - 1) * limit
 
-    // Get total count
-    const { count } = await supabaseAdmin
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-
-    // Get paginated users
-    const { data: users, error } = await supabaseAdmin
+    // Build query for both count and data retrieval
+    let countQuery = supabaseAdmin.from('users').select('*', { count: 'exact', head: true })
+    let dataQuery = supabaseAdmin
       .from('users')
       .select('id, email, first_name, last_name, role, email_verified, is_active, created_at, updated_at')
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+
+    // Apply filters
+    if (filters) {
+      // Search by name or email
+      if (filters.search) {
+        const searchTerm = `%${filters.search.toLowerCase()}%`
+        countQuery = countQuery.or(`email.ilike.${searchTerm},first_name.ilike.${searchTerm},last_name.ilike.${searchTerm}`)
+        dataQuery = dataQuery.or(`email.ilike.${searchTerm},first_name.ilike.${searchTerm},last_name.ilike.${searchTerm}`)
+      }
+
+      // Filter by role
+      if (filters.role && filters.role !== '') {
+        countQuery = countQuery.eq('role', filters.role)
+        dataQuery = dataQuery.eq('role', filters.role)
+      }
+
+      // Filter by status
+      if (filters.status && filters.status !== '') {
+        const isActive = filters.status === 'active'
+        countQuery = countQuery.eq('is_active', isActive)
+        dataQuery = dataQuery.eq('is_active', isActive)
+      }
+    }
+
+    // Apply pagination to data query
+    dataQuery = dataQuery.range(offset, offset + limit - 1)
+
+    // Execute queries
+    const { count } = await countQuery
+    const { data: users, error } = await dataQuery
 
     if (error) {
       console.error('Error listing users:', error)
