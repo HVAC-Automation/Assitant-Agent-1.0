@@ -14,7 +14,8 @@
       "Bash(npm run test:install:*)",
       "Bash(curl:*)",
       "Bash(npm run test:api:*)",
-      "Bash(npx playwright test:*)"
+      "Bash(npx playwright test:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
