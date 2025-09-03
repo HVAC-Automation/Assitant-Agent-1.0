@@ -8,6 +8,8 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { UserNavigation } from '@/components/layout/UserNavigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Bot } from 'lucide-react'
 import { logger } from '@/lib/logger'
 
 interface ChatMessage {
@@ -15,6 +17,14 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
+}
+
+interface Agent {
+  id: string
+  elevenlabs_agent_id: string
+  name: string
+  description?: string
+  is_active: boolean
 }
 
 interface MessageBubbleProps {
@@ -90,6 +100,8 @@ export default function Home() {
   const [audioQueue, setAudioQueue] = useState<string[]>([])
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
   const [transcript, setTranscript] = useState('')
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('')
 
   const wsRef = useRef<WebSocket | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
@@ -112,7 +124,9 @@ export default function Home() {
   const vadIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const apiKey = process.env.NEXT_PUBLIC_ELEVEN_AI_API_KEY || 'sk_a1a42febc7c6cd04b02d24012ffa1bf3e3e9707fe29ab954'
-  const agentId = process.env.NEXT_PUBLIC_ELEVEN_AI_AGENT_ID || 'agent_9901k3wpqp85f80rhmz3t3y1tv5p'
+  // Get the current agent ID from selected agent or fallback
+  const currentAgent = agents.find(agent => agent.id === selectedAgentId)
+  const agentId = currentAgent?.elevenlabs_agent_id || process.env.NEXT_PUBLIC_ELEVEN_AI_AGENT_ID || 'agent_9901k3wpqp85f80rhmz3t3y1tv5p'
 
   const handleError = (error: string) => {
     console.error('ElevenLabs Error:', error)
@@ -1061,6 +1075,30 @@ export default function Home() {
       return () => clearTimeout(timeoutId)
     }
   }, [realTimeMode, enableVoice, isConnected, isPlayingAudio, isSpeaking, isListening])
+
+  // Fetch available agents when component mounts
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        const response = await fetch('/api/agents/active')
+        if (response.ok) {
+          const data = await response.json()
+          setAgents(data.agents || [])
+          
+          // Set first agent as default if none selected
+          if (data.agents && data.agents.length > 0 && !selectedAgentId) {
+            setSelectedAgentId(data.agents[0].id)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch agents:', error)
+      }
+    }
+
+    if (session?.user) {
+      fetchAgents()
+    }
+  }, [session?.user, selectedAgentId])
   
   const startVoiceRecognition = async () => {
     logger.voiceStart('startVoiceRecognition called', {
@@ -1345,7 +1383,36 @@ export default function Home() {
           <h1 className="text-3xl font-bold mb-4">
             Welcome, {session?.user?.name?.split(' ')[0] || 'User'}
           </h1>
-          <p className="text-muted-foreground mb-8">How can I help you today?</p>
+          <p className="text-muted-foreground mb-4">How can I help you today?</p>
+          
+          {/* Agent Selector */}
+          {agents.length > 0 && (
+            <div className="max-w-sm mx-auto mb-4">
+              <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                <SelectTrigger className="w-full">
+                  <div className="flex items-center space-x-2">
+                    <Bot className="h-4 w-4" />
+                    <SelectValue placeholder="Select an agent" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {agents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      <div className="flex items-center space-x-2">
+                        <Bot className="h-4 w-4" />
+                        <span>{agent.name}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {currentAgent && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  {currentAgent.description || `Using ${currentAgent.name} agent`}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Main interface components - Only show after client hydration */}

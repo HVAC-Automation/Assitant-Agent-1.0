@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AgentProfile } from '@/lib/agent-management'
+import { Agent } from '@/lib/agent-management'
 import {
   Table,
   TableBody,
@@ -36,7 +36,7 @@ import {
 import Link from 'next/link'
 
 interface AgentTableProps {
-  agents: AgentProfile[]
+  agents: Agent[]
 }
 
 interface AgentHealth {
@@ -59,7 +59,7 @@ export function AgentTable({ agents }: AgentTableProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          isActive: !currentStatus
+          is_active: !currentStatus
         }),
       })
 
@@ -149,12 +149,12 @@ export function AgentTable({ agents }: AgentTableProps) {
               </TableCell>
               <TableCell>
                 <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                  {agent.elevenLabsAgentId}
+                  {agent.elevenlabs_agent_id}
                 </code>
               </TableCell>
               <TableCell>
-                <Badge variant={agent.isActive ? 'default' : 'secondary'}>
-                  {agent.isActive ? (
+                <Badge variant={agent.is_active ? 'default' : 'secondary'}>
+                  {agent.is_active ? (
                     <>
                       <Play className="mr-1 h-3 w-3" />
                       Active
@@ -207,22 +207,15 @@ export function AgentTable({ agents }: AgentTableProps) {
               </TableCell>
               <TableCell>
                 <div className="space-y-1">
-                  {agent.voiceSettings?.voice_id && (
-                    <div className="text-xs text-gray-500">
-                      Voice: {agent.voiceSettings.voice_id.slice(0, 8)}...
-                    </div>
-                  )}
-                  {agent.configuration.language && (
-                    <Badge variant="outline" className="text-xs">
-                      {agent.configuration.language.toUpperCase()}
-                    </Badge>
-                  )}
+                  <Badge variant="outline" className="text-xs">
+                    Ready
+                  </Badge>
                 </div>
               </TableCell>
               <TableCell className="text-sm text-gray-500">
                 <div className="flex items-center space-x-1">
                   <Clock className="h-3 w-3" />
-                  <span>{new Date(agent.createdAt).toLocaleDateString()}</span>
+                  <span>{new Date(agent.created_at).toLocaleDateString()}</span>
                 </div>
               </TableCell>
               <TableCell>
@@ -256,10 +249,10 @@ export function AgentTable({ agents }: AgentTableProps) {
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => handleToggleStatus(agent.id, agent.isActive)}
+                      onClick={() => handleToggleStatus(agent.id, agent.is_active)}
                       disabled={loading === agent.id}
                     >
-                      {agent.isActive ? (
+                      {agent.is_active ? (
                         <>
                           <Pause className="mr-2 h-4 w-4" />
                           Deactivate
