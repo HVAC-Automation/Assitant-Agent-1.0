@@ -40,10 +40,10 @@ export default withAuth(
       authorized: ({ token, req }) => {
         const { pathname } = req.nextUrl
 
-        // Always allow access to auth pages and public pages
+        // Always allow access to auth pages, API routes, and public pages
         if (
           pathname.startsWith('/auth/') ||
-          pathname.startsWith('/api/auth/') ||
+          pathname.startsWith('/api/') ||
           pathname.startsWith('/public') ||
           pathname.startsWith('/_next/') ||
           pathname.startsWith('/favicon')
@@ -62,12 +62,12 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api/auth (NextAuth.js API routes)
+     * - api (all API routes handle their own auth)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public folder
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|public).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|public).*)",
   ],
 }
