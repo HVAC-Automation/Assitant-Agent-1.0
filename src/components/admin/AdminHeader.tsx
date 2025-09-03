@@ -24,6 +24,10 @@ export function AdminHeader({ user }: AdminHeaderProps) {
     router.push('/')
   }
 
+  const goToSettings = () => {
+    router.push('/settings')
+  }
+
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -51,6 +55,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
           </div>
           
           <Button
+            onClick={goToSettings}
             variant="outline"
             size="sm"
             className="flex items-center space-x-2"

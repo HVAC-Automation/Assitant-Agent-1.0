@@ -1,57 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { UserManager } from '@/lib/user-management'
+import { PasswordResetService } from '@/lib/password-reset'
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { email, token, newPassword } = body
 
-    if (email && !token && !newPassword) {
-      // Request password reset token
-      try {
-        const resetToken = await UserManager.createPasswordResetToken(email)
-        
-        // In a real app, you would send this token via email
-        // For demo purposes, we'll return it (don't do this in production!)
+    // If email is provided, initiate password reset
+    if (email && !token) {
+      const result = await PasswordResetService.initiatePasswordReset(email)
+      
+      if (result.success) {
         return NextResponse.json({
           success: true,
-          message: 'Password reset token created',
-          // Remove this in production - send via email instead
-          token: resetToken,
-          email: email
+          message: result.message,
+          // In development, return the token. In production, this would be sent via email
+          ...(process.env.NODE_ENV === 'development' && { token: result.token })
         })
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        )
-      }
-    } else if (token && newPassword) {
-      // Reset password using token
-      try {
-        await UserManager.resetPasswordWithToken(token, newPassword)
-        
+      } else {
         return NextResponse.json({
-          success: true,
-          message: 'Password reset successfully'
-        })
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        )
+          success: false,
+          error: result.message
+        }, { status: result.error === 'User not found' ? 200 : 400 }) // Return 200 for security (don't reveal if user exists)
       }
-    } else {
-      return NextResponse.json(
-        { error: 'Invalid request. Provide either email (for token) or token + newPassword' },
-        { status: 400 }
-      )
     }
-  } catch (error: any) {
+
+    // If token and newPassword are provided, reset password
+    if (token && newPassword) {
+      const result = await PasswordResetService.resetPassword(token, newPassword)
+      
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          message: result.message
+        })
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: result.message
+        }, { status: 400 })
+      }
+    }
+
+    return NextResponse.json({
+      success: false,
+      error: 'Invalid request. Provide either email or token with newPassword.'
+    }, { status: 400 })
+
+  } catch (error) {
     console.error('Password reset API error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      success: false,
+      error: 'An error occurred while processing your request.'
+    }, { status: 500 })
   }
 }

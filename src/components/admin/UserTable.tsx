@@ -159,6 +159,40 @@ export function UserTable({ users }: UserTableProps) {
     }
   }
 
+  const handleSendVerification = async (userId: string, userEmail: string) => {
+    if (!confirm(`Send verification email to ${userEmail}?`)) {
+      return
+    }
+
+    setLoading(userId)
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/send-verification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        alert(result.message || 'Verification email sent successfully!')
+        
+        // In development, show the token
+        if (process.env.NODE_ENV === 'development' && result.token) {
+          console.log('Verification token (development):', result.token)
+          console.log('Direct verification URL:', `${window.location.origin}/auth/verify-email?token=${result.token}`)
+        }
+      } else {
+        const error = await response.json()
+        alert(`Failed to send verification email: ${error.error || 'Unknown error'}`)
+      }
+    } catch (error) {
+      alert('Failed to send verification email')
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const handleResetPassword = async (userId: string, userEmail: string) => {
     if (!confirm(`Are you sure you want to reset the password for ${userEmail}? The user will receive a new temporary password.`)) {
       return
@@ -355,6 +389,16 @@ export function UserTable({ users }: UserTableProps) {
                       )}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
+                    {!user.emailVerified && (
+                      <DropdownMenuItem
+                        onClick={() => handleSendVerification(user.id, user.email)}
+                        disabled={loading === user.id}
+                        className="text-blue-600 hover:text-blue-900"
+                      >
+                        <Mail className="mr-2 h-4 w-4" />
+                        Send Verification Email
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       onClick={() => handleResetPassword(user.id, user.email)}
                       disabled={loading === user.id}

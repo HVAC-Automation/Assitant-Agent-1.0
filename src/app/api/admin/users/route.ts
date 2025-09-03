@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
-import { UserManagement } from '@/lib/user-management'
+import { UserManager } from '@/lib/user-management'
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       status: status === 'active' ? 'active' : status === 'inactive' ? 'inactive' : undefined
     }
 
-    const result = await UserManagement.listUsers(page, limit, filters)
+    const result = await UserManager.listUsers(page, limit, filters)
 
     return NextResponse.json({
       success: true,

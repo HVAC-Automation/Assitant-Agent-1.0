@@ -4,6 +4,7 @@ import { SupabaseAdapter } from '@auth/supabase-adapter'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcryptjs'
 import type { Database } from './supabase'
+import { PasswordResetService } from './password-reset'
 
 // Create Supabase client for NextAuth (service role for admin operations)
 const supabaseServiceRole = createClient<Database>(
@@ -50,38 +51,61 @@ const authConfig = NextAuth({
         try {
           // Get user from database
           const { data: user, error } = await supabaseServiceRole
-            .from('User')
-            .select('id, email, passwordHash, firstName, lastName, role, isActive, emailVerified')
+            .from('users')
+            .select('id, email, password_hash, first_name, last_name, role, is_active, email_verified, failed_login_attempts, locked_until')
             .eq('email', credentials.email.toLowerCase())
             .single()
 
           if (error || !user) {
+            // Handle failed login attempt even if user doesn't exist (security)
+            await PasswordResetService.handleFailedLogin(credentials.email as string)
             throw new Error('Invalid email or password')
           }
 
+          // Check if account is locked
+          const now = new Date()
+          const lockedUntil = user.locked_until ? new Date(user.locked_until) : null
+          
+          if (lockedUntil && now < lockedUntil) {
+            const minutesLeft = Math.ceil((lockedUntil.getTime() - now.getTime()) / (1000 * 60))
+            throw new Error(`Account is temporarily locked due to too many failed login attempts. Please try again in ${minutesLeft} minutes or reset your password.`)
+          }
+
           // Check if user is active
-          if (!user.isActive) {
+          if (!user.is_active) {
             throw new Error('Account is deactivated. Please contact support.')
           }
 
           // Verify password
           const isValidPassword = await bcrypt.compare(
             credentials.password as string, 
-            user.passwordHash
+            user.password_hash
           )
 
           if (!isValidPassword) {
+            // Handle failed login attempt
+            const lockoutInfo = await PasswordResetService.handleFailedLogin(credentials.email as string)
+            
+            if (lockoutInfo.isLocked) {
+              throw new Error('Too many failed login attempts. Your account has been temporarily locked. Please reset your password or try again later.')
+            } else if (lockoutInfo.attemptsLeft > 0) {
+              throw new Error(`Invalid email or password. ${lockoutInfo.attemptsLeft} attempt${lockoutInfo.attemptsLeft === 1 ? '' : 's'} remaining before account lockout.`)
+            }
+            
             throw new Error('Invalid email or password')
           }
 
-          // Return user object (passwordHash excluded for security)
+          // Clear failed attempts on successful login
+          await PasswordResetService.clearFailedAttempts(user.id)
+
+          // Return user object (password_hash excluded for security)
           return {
             id: user.id,
             email: user.email,
-            name: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email,
+            name: user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user.email,
             role: user.role,
-            emailVerified: user.emailVerified,
-            isActive: user.isActive,
+            emailVerified: user.email_verified,
+            isActive: user.is_active,
           }
         } catch (error) {
           console.error('Authentication error:', error)
@@ -91,7 +115,7 @@ const authConfig = NextAuth({
     })
   ],
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, trigger }) {
       // Persist user data in JWT token
       if (user) {
         token.id = user.id
@@ -100,6 +124,32 @@ const authConfig = NextAuth({
         token.emailVerified = (user as any).emailVerified
         token.isActive = (user as any).isActive
       }
+      
+      // Refresh user data from database when session is updated
+      if (trigger === 'update' && token.id) {
+        try {
+          const { data: userData, error } = await supabaseServiceRole
+            .from('users')
+            .select('id, email, first_name, last_name, role, email_verified, is_active')
+            .eq('id', token.id as string)
+            .single()
+
+          if (userData && !error) {
+            token.email = userData.email
+            token.role = userData.role
+            token.emailVerified = userData.email_verified
+            token.isActive = userData.is_active
+            // Update name from first_name and last_name
+            const fullName = userData.first_name 
+              ? `${userData.first_name} ${userData.last_name || ''}`.trim()
+              : userData.email
+            token.name = fullName
+          }
+        } catch (error) {
+          console.error('Error refreshing user data in JWT:', error)
+        }
+      }
+      
       return token
     },
     async session({ session, token }) {
@@ -107,6 +157,7 @@ const authConfig = NextAuth({
       if (token && session.user) {
         session.user.id = token.id as string
         session.user.email = token.email as string
+        session.user.name = token.name as string
         ;(session.user as any).role = token.role as string
         ;(session.user as any).emailVerified = token.emailVerified as boolean
         ;(session.user as any).isActive = token.isActive as boolean

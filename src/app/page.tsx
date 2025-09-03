@@ -733,15 +733,14 @@ export default function Home() {
               // Get current VAD analysis
               const vadResult = vadAnalyserRef.current ? analyzeAudioForVoice(vadAnalyserRef.current) : null
               
-              // TEMPORARILY DISABLED: VAD blocking for testing
-              // Testing without VAD to isolate interruption detection issues
+              // VAD blocking for interruption prevention
               if (vadResult && !vadResult.hasVoice) {
-                console.log('⚠️ VAD would block interruption (disabled for testing):', {
+                console.log('🚫 VAD blocking interruption (no human voice detected):', {
                   vadEnergy: vadResult.energy.toFixed(3),
                   vadVoiceEnergy: vadResult.voiceEnergy.toFixed(0),
                   vadEntropy: vadResult.entropy.toFixed(3)
                 })
-                // return false  // DISABLED FOR TESTING
+                return false  // Block interruption when no human voice detected
               }
               
               // Check speech recognition results
