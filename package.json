@@ -6,7 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "playwright test",
+    "test:api": "playwright test tests/api",
+    "test:e2e": "playwright test tests/e2e",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report",
+    "test:install": "playwright install"
   },
   "dependencies": {
     "@auth/supabase-adapter": "^1.10.0",
@@ -37,6 +45,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.0.0",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/minimatch": "^6.0.0",
     "@types/node": "^20.0.0",

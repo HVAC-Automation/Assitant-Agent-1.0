@@ -50,8 +50,8 @@ const authConfig = NextAuth({
         try {
           // Get user from database
           const { data: user, error } = await supabaseServiceRole
-            .from('users')
-            .select('id, email, password_hash, first_name, last_name, role, is_active, email_verified')
+            .from('User')
+            .select('id, email, passwordHash, firstName, lastName, role, isActive, emailVerified')
             .eq('email', credentials.email.toLowerCase())
             .single()
 
@@ -60,28 +60,28 @@ const authConfig = NextAuth({
           }
 
           // Check if user is active
-          if (!user.is_active) {
+          if (!user.isActive) {
             throw new Error('Account is deactivated. Please contact support.')
           }
 
           // Verify password
           const isValidPassword = await bcrypt.compare(
             credentials.password as string, 
-            user.password_hash
+            user.passwordHash
           )
 
           if (!isValidPassword) {
             throw new Error('Invalid email or password')
           }
 
-          // Return user object (password_hash excluded for security)
+          // Return user object (passwordHash excluded for security)
           return {
             id: user.id,
             email: user.email,
-            name: user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user.email,
+            name: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email,
             role: user.role,
-            emailVerified: user.email_verified,
-            isActive: user.is_active,
+            emailVerified: user.emailVerified,
+            isActive: user.isActive,
           }
         } catch (error) {
           console.error('Authentication error:', error)
